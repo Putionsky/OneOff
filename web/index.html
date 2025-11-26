@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>One Off - Three.js Prototype</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div id="overlay">
+      <h1>One Off</h1>
+      <p>Click to lock the mouse and start the prototype.</p>
+      <ul>
+        <li><strong>Move:</strong> WASD</li>
+        <li><strong>Jump:</strong> Space</li>
+        <li><strong>Shoot:</strong> Left click</li>
+      </ul>
+      <p class="tip">Elves are cubes; clear the wave and listen for Santa's shout.</p>
+    </div>
+    <div id="hud">
+      <span id="status">Wave 1</span>
+      <span id="score">Elves defeated: 0</span>
+      <span id="shout"></span>
+    </div>
+    <canvas id="c"></canvas>
+    <script type="module" src="main.js"></script>
+  </body>
+</html>
