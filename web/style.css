@@ -1,0 +1,98 @@
+:root {
+  --bg: radial-gradient(circle at 20% 20%, #1f1f3a, #0b0b12 55%);
+  --accent: #ef4444;
+  --text: #f8fafc;
+  --muted: #cbd5e1;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  font-family: "Inter", system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+#c {
+  width: 100vw;
+  height: 100vh;
+  display: block;
+}
+
+#overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(12, 12, 16, 0.7);
+  text-align: center;
+  padding: 1rem;
+  transition: opacity 0.2s ease;
+}
+
+#overlay.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+#overlay h1 {
+  margin: 0 0 0.35rem;
+  font-size: 2rem;
+  letter-spacing: 0.04em;
+}
+
+#overlay p {
+  margin: 0.25rem 0;
+  color: var(--muted);
+}
+
+#overlay ul {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0;
+  color: var(--text);
+}
+
+#overlay li {
+  margin: 0.1rem 0;
+}
+
+#overlay .tip {
+  font-size: 0.95rem;
+  color: #c084fc;
+}
+
+#hud {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 1rem;
+  padding: 0.6rem 1rem;
+  background: rgba(12, 12, 16, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  backdrop-filter: blur(12px);
+  font-weight: 600;
+  align-items: center;
+  pointer-events: none;
+}
+
+#shout {
+  color: var(--accent);
+  text-shadow: 0 2px 12px rgba(239, 68, 68, 0.4);
+}
+
+@media (max-width: 640px) {
+  #hud {
+    font-size: 0.9rem;
+    gap: 0.5rem;
+  }
+}
