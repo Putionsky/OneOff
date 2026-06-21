@@ -1,0 +1,11 @@
+{
+  "name": "humanized-piano-performer",
+  "version": "0.1.0",
+  "description": "Real-time MIDI chord -> humanized piano performance engine + browser instrument",
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "serve": "node scripts/serve.js"
+  },
+  "license": "MIT"
+}

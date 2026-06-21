@@ -1,0 +1,173 @@
+:root {
+  --bg: #14161c;
+  --panel: #1c1f29;
+  --panel-2: #232734;
+  --ink: #e8eaf0;
+  --muted: #9aa2b4;
+  --accent: #f0a868;
+  --accent-2: #6fb6ff;
+  --key-white: #f4f1ea;
+  --key-white-held: #f0a868;
+  --key-black: #20232c;
+  --key-black-held: #c8843e;
+  --radius: 12px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  background: radial-gradient(1200px 600px at 50% -10%, #1b1f2b 0%, var(--bg) 60%);
+  color: var(--ink);
+  min-height: 100vh;
+  padding-bottom: 3rem;
+}
+
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+header {
+  text-align: center;
+  padding: 2.2rem 1rem 1rem;
+}
+header h1 {
+  margin: 0;
+  font-size: 1.9rem;
+  letter-spacing: 0.3px;
+}
+.tagline { color: var(--muted); margin: 0.4rem 0 0; }
+
+main {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 0 1rem;
+  display: grid;
+  gap: 1rem;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid #2a2f3d;
+  border-radius: var(--radius);
+  padding: 1rem 1.1rem;
+}
+
+.transport, .routing {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.2rem;
+  align-items: center;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+}
+.field.checkbox { flex-direction: row; align-items: center; gap: 0.4rem; }
+.field label { color: var(--muted); }
+.field select, .field input[type="range"] { accent-color: var(--accent); }
+
+select {
+  background: var(--panel-2);
+  color: var(--ink);
+  border: 1px solid #333a4a;
+  border-radius: 8px;
+  padding: 0.4rem 0.5rem;
+}
+select:disabled { opacity: 0.45; }
+
+button.primary {
+  background: linear-gradient(180deg, var(--accent) 0%, #d98c44 100%);
+  color: #1a1206;
+  border: none;
+  border-radius: 10px;
+  padding: 0.6rem 1.1rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+button.primary:disabled { opacity: 0.6; cursor: default; }
+
+.chord {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--muted);
+  font-family: ui-monospace, monospace;
+}
+.chord.active { color: var(--accent-2); }
+
+.status {
+  flex-basis: 100%;
+  margin: 0.2rem 0 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.controls-panel h2, .controls-panel { margin-top: 0; }
+.controls-panel h2 { font-size: 1rem; color: var(--muted); font-weight: 600; margin: 0 0 0.8rem; }
+
+.controls-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 1rem 1.4rem;
+}
+.control { display: flex; flex-direction: column; gap: 0.35rem; }
+.control-head { display: flex; justify-content: space-between; align-items: baseline; }
+.control-head label { font-weight: 600; }
+.control-value {
+  font-family: ui-monospace, monospace;
+  color: var(--accent);
+  font-size: 0.85rem;
+}
+.control input[type="range"] { width: 100%; accent-color: var(--accent); }
+.blurb { margin: 0; font-size: 0.74rem; color: var(--muted); line-height: 1.3; }
+
+.unit { color: var(--muted); font-size: 0.75rem; margin-left: 0.2rem; }
+
+/* Keyboard */
+.keyboard-panel { overflow: hidden; }
+.keyboard {
+  position: relative;
+  height: 150px;
+  display: flex;
+  user-select: none;
+  touch-action: none;
+}
+.key {
+  position: relative;
+  border-radius: 0 0 6px 6px;
+  cursor: pointer;
+}
+.key.white {
+  background: linear-gradient(180deg, #fbf9f4 0%, var(--key-white) 100%);
+  border: 1px solid #cfc9ba;
+  border-top: none;
+  height: 100%;
+}
+.key.white.held, .key.white.sounding {
+  background: linear-gradient(180deg, #ffd9ab 0%, var(--key-white-held) 100%);
+}
+.key.black {
+  position: absolute;
+  top: 0;
+  height: 62%;
+  background: linear-gradient(180deg, #2c303c 0%, var(--key-black) 100%);
+  border: 1px solid #11141b;
+  z-index: 2;
+}
+.key.black.held, .key.black.sounding {
+  background: linear-gradient(180deg, #e0a05a 0%, var(--key-black-held) 100%);
+}
+.key.sounding { box-shadow: 0 0 14px 2px var(--accent-2); }
+
+.hint { color: var(--muted); font-size: 0.8rem; margin: 0.7rem 0 0; }
+
+footer {
+  max-width: 980px;
+  margin: 1.4rem auto 0;
+  padding: 0 1rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-align: center;
+}

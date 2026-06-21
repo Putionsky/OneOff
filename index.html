@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Humanized Piano Performer</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header>
+    <h1>Humanized Piano Performer</h1>
+    <p class="tagline">Feed it chords. It plays them back like someone sitting at the piano.</p>
+  </header>
+
+  <main>
+    <section class="panel transport">
+      <button id="start-audio" class="primary">Start audio</button>
+
+      <div class="field">
+        <label for="tempo">Tempo</label>
+        <input type="range" id="tempo" min="40" max="180" value="96" />
+        <span id="tempo-val" class="mono">96</span><span class="unit">BPM</span>
+      </div>
+
+      <div class="field">
+        <label for="preset">Feel</label>
+        <select id="preset"></select>
+      </div>
+
+      <div class="field">
+        <label>Now playing</label>
+        <span id="chord-readout" class="chord">—</span>
+      </div>
+    </section>
+
+    <section class="panel routing">
+      <div class="field">
+        <label for="midi-in">MIDI in</label>
+        <select id="midi-in"><option value="">All inputs</option></select>
+      </div>
+      <div class="field">
+        <label for="out-mode">Output</label>
+        <select id="out-mode">
+          <option value="synth">Built-in piano</option>
+          <option value="midi">MIDI out</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="midi-out">MIDI out port</label>
+        <select id="midi-out" disabled><option value="">No MIDI outputs</option></select>
+      </div>
+      <div class="field checkbox">
+        <input type="checkbox" id="pedal" checked />
+        <label for="pedal">Sustain pedal</label>
+      </div>
+      <p id="midi-status" class="status">Press “Start audio”, then play chords.</p>
+    </section>
+
+    <section class="panel controls-panel">
+      <h2>Performance controls</h2>
+      <div id="controls" class="controls-grid"></div>
+    </section>
+
+    <section class="panel keyboard-panel">
+      <div id="keyboard"></div>
+      <p class="hint">Hold a chord with the mouse, touch, your MIDI controller, or the
+        computer keys <span class="mono">a w s e d f t g y h u j</span>.</p>
+    </section>
+  </main>
+
+  <footer>
+    <p>The performance engine (<span class="mono">src/engine</span>) is pure, framework-free
+      JavaScript — the same code that powers this page is unit-tested with
+      <span class="mono">node --test</span> and is portable to a native plugin shell.</p>
+  </footer>
+
+  <script type="module" src="src/app.js"></script>
+</body>
+</html>
