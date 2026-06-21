@@ -105,15 +105,32 @@ class App {
 
   updateChordReadout() {
     const el = document.getElementById('chord-readout');
-    if (!el) return;
-    const c = this.performer.chord;
-    if (!c) {
-      el.textContent = '—';
-      el.classList.remove('active');
-      return;
+    if (el) {
+      const c = this.performer.chord;
+      if (!c) {
+        el.textContent = '—';
+        el.classList.remove('active');
+      } else {
+        el.textContent = `${noteName(c.root + 60).slice(0, -1)} ${c.quality}`;
+        el.classList.add('active');
+      }
     }
-    el.textContent = `${noteName(c.root + 60).slice(0, -1)} ${c.quality}`;
-    el.classList.add('active');
+
+    // Inferred scale persists once played, even after the keys are released —
+    // it's the running tonal context, not just the chord under the hands.
+    const scaleEl = document.getElementById('scale-readout');
+    if (scaleEl) {
+      const s = this.performer.getScale();
+      if (!s) {
+        scaleEl.textContent = '—';
+        scaleEl.classList.remove('active');
+      } else {
+        // Dim the readout when the engine isn't confident about the key yet.
+        scaleEl.textContent = s.name;
+        scaleEl.classList.add('active');
+        scaleEl.style.opacity = (0.55 + Math.min(0.45, s.confidence)).toFixed(2);
+      }
+    }
   }
 
   // --- Scheduler ------------------------------------------------------------

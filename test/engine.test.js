@@ -9,6 +9,7 @@ import {
   extensionPcs,
 } from '../src/engine/music.js';
 import { buildVoicing } from '../src/engine/voicing.js';
+import { ScaleTracker } from '../src/engine/scale.js';
 import { Performer, DEFAULT_PARAMS } from '../src/engine/performer.js';
 
 // --- RNG -------------------------------------------------------------------
@@ -84,6 +85,60 @@ test('selection adds color tones beyond the literal chord', () => {
   const pcs = (v) => new Set(v.voices.map(pitchClass));
   assert.ok(pcs(rich).size >= pcs(literal).size, 'more distinct tones with selection');
   assert.ok(extensionPcs(chord).length > 0);
+});
+
+// --- Scale tracking --------------------------------------------------------
+
+test('a ii-V-I in C is heard as C major', () => {
+  const t = new ScaleTracker();
+  t.observeChord(detectChord([62, 65, 69, 72])); // Dm7
+  t.observeChord(detectChord([67, 71, 74, 77])); // G7
+  t.observeChord(detectChord([60, 64, 67, 71])); // Cmaj7
+  const s = t.estimate();
+  assert.equal(pitchClass(s.tonic), 0, 'tonic C');
+  assert.equal(s.mode, 'major');
+  assert.deepEqual(s.scalePcs, [0, 2, 4, 5, 7, 9, 11]);
+});
+
+test('a minor ii-V-i is heard as a minor key', () => {
+  const t = new ScaleTracker();
+  t.observeChord(detectChord([62, 65, 68, 72])); // Dm7b5
+  t.observeChord(detectChord([64, 68, 71, 74])); // E7(ish)
+  t.observeChord(detectChord([57, 60, 64, 67])); // Am7
+  const s = t.estimate();
+  assert.equal(pitchClass(s.tonic), 9, 'tonic A');
+  assert.equal(s.mode, 'minor');
+});
+
+test('the most recent chord dominates a key change', () => {
+  const t = new ScaleTracker({ decay: 0.5 });
+  // Establish C major, then move firmly to E-flat major territory.
+  t.observeChord(detectChord([60, 64, 67])); // C
+  t.observeChord(detectChord([67, 71, 74])); // G
+  const before = t.estimate();
+  // C and G establish sharp-side territory (no flats).
+  assert.ok(!before.scalePcs.includes(10), 'no Bb in the initial key');
+  t.observeChord(detectChord([63, 67, 70])); // Eb
+  t.observeChord(detectChord([58, 62, 65])); // Bb
+  t.observeChord(detectChord([63, 67, 70])); // Eb again
+  const after = t.estimate();
+  assert.notEqual(after.tonic, before.tonic, 'key followed the new context');
+  assert.ok(after.scalePcs.includes(10), 'flat-side key after the move (contains Bb)');
+});
+
+test('no observations yields no scale', () => {
+  const t = new ScaleTracker();
+  assert.equal(t.estimate(), null);
+});
+
+test('performer exposes a contextual scale after a chord is played', () => {
+  const p = new Performer({ seed: 3 });
+  assert.equal(p.getScale(), null);
+  p.setHeldNotes([60, 64, 67, 71]); // Cmaj7
+  const s = p.getScale();
+  assert.ok(s, 'scale inferred');
+  assert.equal(pitchClass(s.tonic), 0);
+  assert.ok(Array.isArray(s.scalePcs) && s.scalePcs.length === 7);
 });
 
 // --- Performer integration -------------------------------------------------

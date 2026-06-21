@@ -184,9 +184,13 @@ export function generateStep(voicing, params, ctx, state, rng) {
   const isTop = idx === voiceCount - 1;
 
   // Embellishment: a grace/approach note a hair before a melody note. Driven by
-  // note selection — this is the ornament that most reads as "a player".
+  // note selection — this is the ornament that most reads as "a player". The
+  // approach tone is drawn from the contextual key scale when one has been
+  // inferred, so passing notes move within the tonality rather than just the
+  // current chord; it falls back to the chord-local scale otherwise.
+  const embellishScale = ctx.keyScale || voicing.scale;
   if (selection > 0.4 && chance(rng, selection * 0.3) && mw < 0.9) {
-    const grace = approachTone(midi, voicing.scale, rng);
+    const grace = approachTone(midi, embellishScale, rng);
     events.push({
       midi: grace,
       velocity: velocityFor(

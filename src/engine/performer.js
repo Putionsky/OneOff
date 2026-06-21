@@ -6,6 +6,7 @@
 import { detectChord } from './music.js';
 import { buildVoicing } from './voicing.js';
 import { generateStep, makeWalkState } from './patterns.js';
+import { ScaleTracker } from './scale.js';
 import { makeRng } from './rng.js';
 
 export const DEFAULT_PARAMS = {
@@ -27,6 +28,10 @@ export class Performer {
     this.voicing = null;      // current target voicing
     this.heldNotes = new Set();
     this.walk = makeWalkState();
+
+    // Contextual key/scale inference across the chords played so far.
+    this.scaleTracker = new ScaleTracker({ decay: options.scaleDecay ?? 0.55 });
+    this.currentScale = null;  // last estimate(): { tonic, mode, scalePcs, name, confidence }
 
     this.stepIndex = 0;       // absolute step counter since start
     this.nextStepTime = 0;    // absolute time (seconds) of the next step
@@ -77,7 +82,16 @@ export class Performer {
         this.walk.arpIndex,
         Math.max(0, this.voicing.voices.length - 1),
       );
+      // Fold the new chord into the running key estimate and refresh the scale
+      // the part should move within.
+      this.scaleTracker.observeChord(next);
+      this.currentScale = this.scaleTracker.estimate();
     }
+  }
+
+  // Current contextual scale estimate, or null before any chord is played.
+  getScale() {
+    return this.currentScale;
   }
 
   noteOn(midi) {
@@ -120,7 +134,12 @@ export class Performer {
     if (!this.voicing) return;
     const step = ((this.stepIndex % this.stepsPerBar) + this.stepsPerBar) % this.stepsPerBar;
     const bar = Math.floor(this.stepIndex / this.stepsPerBar);
-    const ctx = { step, stepsPerBar: this.stepsPerBar, bar };
+    const ctx = {
+      step,
+      stepsPerBar: this.stepsPerBar,
+      bar,
+      keyScale: this.currentScale ? this.currentScale.scalePcs : null,
+    };
     const events = generateStep(this.voicing, this.params, ctx, this.walk, this.rng);
     const spb = this.secondsPerBeat();
     for (const e of events) {

@@ -97,6 +97,14 @@ button.primary:disabled { opacity: 0.6; cursor: default; }
 }
 .chord.active { color: var(--accent-2); }
 
+.scale {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--muted);
+  font-family: ui-monospace, monospace;
+}
+.scale.active { color: var(--accent); }
+
 .status {
   flex-basis: 100%;
   margin: 0.2rem 0 0;

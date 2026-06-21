@@ -48,11 +48,22 @@ Driving pop).
 
 ## How it works
 
-A held chord becomes a performance in three stages:
+A held chord becomes a performance in three stages, with a running key estimate
+threaded through them:
 
 1. **Detect** (`src/engine/music.js`) — identify the chord's root and quality from
    the held notes (triads through 7ths, sus, dim, plus a graceful cluster
    fallback) and know which color tones and scale tones are idiomatic for it.
+1b. **Infer the scale** (`src/engine/scale.js`) — track the tonal center the music
+   is moving through, not just the chord under the hands. Each chord (and its
+   notes) feeds a pitch-class histogram that **decays over time**, so the most
+   recent chord dominates while previous chords still pull on the result. The
+   histogram is matched against the Krumhansl–Schmuckler key profiles to pick a
+   tonic and major/minor quality. The result is shown on screen and used to keep
+   melodic passing/grace notes moving *within the inferred key* rather than only
+   the current chord — e.g. a Dm7 → G7 → Cmaj7 settles into C major, and an Am7
+   after it stays in C rather than flipping. Light hysteresis stops the readout
+   from flickering on passing chords.
 2. **Voice** (`src/engine/voicing.js`) — lay the chord out as keys two hands would
    actually hold: a bass anchor and a right-hand voicing, shaped by *spread*
    (close ↔ open), *warmth* (register and brightness), and *note selection*
@@ -77,6 +88,7 @@ src/
   engine/        ← pure, framework-free musical brain (unit-tested)
     rng.js         seedable RNG + gaussian/chance helpers
     music.js       note naming, chord detection, scales, extensions
+    scale.js       contextual key/scale inference (decaying K–S key-finding)
     voicing.js     chord  -> two-handed voicing (spread/warmth/selection)
     humanize.js    timing jitter, swing, velocity dynamics, chord rolls
     patterns.js    voicing -> per-step note events (density/selection)
