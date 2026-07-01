@@ -24,11 +24,41 @@ function nearestOctave(pc, target) {
   return clampMidi(best);
 }
 
+// Place a pitch class at whatever octave sits closest to an existing set of
+// notes — the core of smooth voice leading. Common tones map to themselves
+// (distance 0); everything else takes the shortest step.
+function placeNearSet(pc, prev) {
+  let best = null;
+  let bestDist = Infinity;
+  for (let m = ((pc % 12) + 12) % 12; m <= 104; m += 12) {
+    let d = Infinity;
+    for (const p of prev) d = Math.min(d, Math.abs(m - p));
+    if (d < bestDist) {
+      bestDist = d;
+      best = m;
+    }
+  }
+  return best;
+}
+
+// After voice-leading placement, two voices can land on the same key. Nudge
+// duplicates up an octave so the chord keeps all its tones.
+function spaceOutCollisions(notes) {
+  const sorted = [...notes].sort((a, b) => a - b);
+  const out = [];
+  for (let n of sorted) {
+    while (out.includes(n)) n += 12;
+    out.push(clampMidi(n));
+  }
+  return out;
+}
+
 // Build the two-handed voicing for a chord.
 //
 // params: { spread, warmth, selection } each 0..1
+// prevVoices: the previous voicing's right-hand notes, for voice leading (or null).
 // Returns { bass, voices, all } where `voices` is the right-hand voicing low->high.
-export function buildVoicing(chord, params, rng) {
+export function buildVoicing(chord, params, rng, prevVoices = null) {
   const { spread, warmth, selection } = params;
 
   // Warmth pulls the whole voicing into a rounder, lower-mid register and away
@@ -65,19 +95,29 @@ export function buildVoicing(chord, params, rng) {
     tonePcs.delete(chord.root);
   }
 
-  // Lay the tones out around the center. Closed voicing keeps them within an
-  // octave; spread opens them out so adjacent voices can jump an octave,
-  // producing the wide, ringing sound of an open piano voicing.
   const pcs = [...tonePcs];
-  const voices = [];
-  let cursor = center - 4;
-  for (let i = 0; i < pcs.length; i++) {
-    let note = nearestOctave(pcs[i], cursor);
-    if (note <= cursor) note += 12; // keep ascending so voices don't collide
-    // Spread: sometimes lift a voice an extra octave to open the chord.
-    if (chance(rng, spread * 0.4) && i > 0) note += 12;
-    voices.push(clampMidi(note));
-    cursor = note;
+  let voices;
+  if (prevVoices && prevVoices.length) {
+    // Voice-leading: place each new tone at the octave nearest the previous
+    // voicing, so common tones are held and the others move by the smallest
+    // step — the way a real player keeps a hand still and lets fingers walk to
+    // the closest chord tone instead of jumping to a fresh block every change.
+    voices = pcs.map((pc) => clampMidi(placeNearSet(pc, prevVoices)));
+    voices = spaceOutCollisions(voices);
+  } else {
+    // First chord (no history): lay the tones out around the center. Closed
+    // voicing keeps them within an octave; spread opens them out so adjacent
+    // voices can jump an octave for a wide, ringing sound.
+    voices = [];
+    let cursor = center - 4;
+    for (let i = 0; i < pcs.length; i++) {
+      let note = nearestOctave(pcs[i], cursor);
+      if (note <= cursor) note += 12; // keep ascending so voices don't collide
+      // Spread: sometimes lift a voice an extra octave to open the chord.
+      if (chance(rng, spread * 0.4) && i > 0) note += 12;
+      voices.push(clampMidi(note));
+      cursor = note;
+    }
   }
   voices.sort((a, b) => a - b);
 

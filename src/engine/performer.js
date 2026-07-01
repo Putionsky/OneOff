@@ -22,11 +22,14 @@ export class Performer {
     this.params = { ...DEFAULT_PARAMS, ...(options.params || {}) };
     this.bpm = options.bpm || 96;
     this.stepsPerBar = options.stepsPerBar || 16; // 16th notes in 4/4
+    this.barsPerPhrase = options.barsPerPhrase || 4;
     this.rng = makeRng(options.seed ?? 1234);
 
     this.chord = null;        // detected chord object
     this.voicing = null;      // current target voicing
-    this.heldNotes = new Set();
+    this.heldNotes = new Set();     // notes the engine is currently performing
+    this.physicallyHeld = new Set(); // keys actually down (differs under latch)
+    this.latch = false;
     this.walk = makeWalkState();
 
     // Contextual key/scale inference across the chords played so far.
@@ -76,7 +79,10 @@ export class Performer {
       this.chord.bass === next.bass;
     this.chord = next;
     if (!sameChord) {
-      this.voicing = buildVoicing(next, this.params, this.rng);
+      // Feed the outgoing voicing in so the new chord leads its voices smoothly
+      // from the last one instead of jumping to a fresh block.
+      const prevVoices = this.voicing ? this.voicing.voices : null;
+      this.voicing = buildVoicing(next, this.params, this.rng, prevVoices);
       // Keep the walk valid for the new voicing length.
       this.walk.arpIndex = Math.min(
         this.walk.arpIndex,
@@ -94,16 +100,39 @@ export class Performer {
     return this.currentScale;
   }
 
+  // Latch/hold: when on, the chord keeps sounding after the keys are released,
+  // and the next fresh key-press starts a new chord. Lets you play a progression
+  // one grab at a time and leave your hands free.
+  setLatch(on) {
+    this.latch = !!on;
+    if (!this.latch) this.setHeldNotes([...this.physicallyHeld]);
+  }
+
   noteOn(midi) {
-    const set = new Set(this.heldNotes);
-    set.add(midi);
-    this.setHeldNotes([...set]);
+    const wasEmpty = this.physicallyHeld.size === 0;
+    this.physicallyHeld.add(midi);
+    if (this.latch && wasEmpty) {
+      // A new grab after everything was released: replace the latched chord.
+      this.setHeldNotes([midi]);
+    } else if (this.latch) {
+      const set = new Set(this.heldNotes);
+      set.add(midi);
+      this.setHeldNotes([...set]);
+    } else {
+      this.setHeldNotes([...this.physicallyHeld]);
+    }
   }
 
   noteOff(midi) {
-    const set = new Set(this.heldNotes);
-    set.delete(midi);
-    this.setHeldNotes([...set]);
+    this.physicallyHeld.delete(midi);
+    if (!this.latch) this.setHeldNotes([...this.physicallyHeld]);
+    // In latch mode the sounding chord is intentionally kept after release.
+  }
+
+  // Panic / all-notes-off: forget every held and latched note and go silent.
+  clear() {
+    this.physicallyHeld.clear();
+    this.setHeldNotes([]);
   }
 
   start(time = 0) {
@@ -134,10 +163,15 @@ export class Performer {
     if (!this.voicing) return;
     const step = ((this.stepIndex % this.stepsPerBar) + this.stepsPerBar) % this.stepsPerBar;
     const bar = Math.floor(this.stepIndex / this.stepsPerBar);
+    // Position within a repeating phrase (default 4 bars) so the engine can
+    // shape long-breath dynamics and end-of-phrase rubato.
+    const phraseSteps = this.barsPerPhrase * this.stepsPerBar;
+    const phrasePos = (((this.stepIndex % phraseSteps) + phraseSteps) % phraseSteps) / phraseSteps;
     const ctx = {
       step,
       stepsPerBar: this.stepsPerBar,
       bar,
+      phrasePos,
       keyScale: this.currentScale ? this.currentScale.scalePcs : null,
     };
     const events = generateStep(this.voicing, this.params, ctx, this.walk, this.rng);

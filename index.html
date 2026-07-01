@@ -27,6 +27,13 @@
         <select id="preset"></select>
       </div>
 
+      <div class="field checkbox">
+        <input type="checkbox" id="latch" />
+        <label for="latch" title="Keep the chord playing after you release the keys">Latch / hold</label>
+      </div>
+
+      <button id="panic" class="ghost" title="Stop all sound (all notes off)">Panic</button>
+
       <div class="field">
         <label>Now playing</label>
         <span id="chord-readout" class="chord">—</span>
@@ -58,11 +65,15 @@
         <input type="checkbox" id="pedal" checked />
         <label for="pedal">Sustain pedal</label>
       </div>
+      <button id="record" class="ghost" title="Record the generated performance and download a .mid file">● Record MIDI</button>
       <p id="midi-status" class="status">Press “Start audio”, then play chords.</p>
     </section>
 
     <section class="panel controls-panel">
-      <h2>Performance controls</h2>
+      <div class="controls-header">
+        <h2>Performance controls</h2>
+        <button id="randomize" class="mini" title="Roll a fresh, musical set of controls">🎲 Surprise me</button>
+      </div>
       <div id="controls" class="controls-grid"></div>
     </section>
 

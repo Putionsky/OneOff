@@ -16,13 +16,17 @@ import { gaussian, range } from './rng.js';
 //  - Metric anchoring: strong beats are held tighter than weak ones, the way a
 //    player keeps the pulse steady but lets ornaments float.
 export function timingOffsetBeats(ctx, timing, rng) {
-  const { isOffbeat, metricWeight } = ctx; // metricWeight 0..1, 1 = downbeat
+  const { isOffbeat, metricWeight, phrasePos = 0 } = ctx; // metricWeight 0..1, 1 = downbeat
   // Looser on weak positions, tighter on strong ones.
   const looseness = timing * (1.0 - 0.6 * metricWeight);
   const jitter = gaussian(rng) * 0.045 * looseness; // up to ~45ms-ish at 120bpm
   // Swing: only off-beats, and only as timing opens up. Max ~1/3 of a 16th.
   const swing = isOffbeat ? timing * 0.12 : 0;
-  return jitter + swing;
+  // Rubato: a gentle push into a phrase and a slight drag (ritardando) as it
+  // ends, so four-bar groups breathe instead of running on a treadmill.
+  let rubato = 0;
+  if (phrasePos > 0.85) rubato = timing * 0.09 * ((phrasePos - 0.85) / 0.15);
+  return jitter + swing + rubato;
 }
 
 // Velocity for a note, 1..127.
@@ -31,7 +35,7 @@ export function timingOffsetBeats(ctx, timing, rng) {
 // by warmth (warmer = softer, rounder), expressive random variation, and a
 // voice taper so inner/upper voices sit under the melody and bass.
 export function velocityFor(ctx, params, rng) {
-  const { metricWeight, voiceRole, voiceIndex, voiceCount } = ctx;
+  const { metricWeight, voiceRole, voiceIndex, voiceCount, phrasePos = 0 } = ctx;
   const { warmth, timing } = params;
 
   // Base level: warmth lowers the ceiling and softens the floor.
@@ -51,10 +55,14 @@ export function velocityFor(ctx, params, rng) {
     role = -10 + t * 6;
   }
 
+  // Phrase arc: a gentle swell toward the middle of a phrase and a softening at
+  // its edges, the long-breath dynamic shape a sequencer never has.
+  const phraseArc = (Math.sin(Math.PI * phrasePos) - 0.35) * 9;
+
   // Expressive human variation; a touch wider as `timing` (looseness) grows.
   const variation = gaussian(rng) * (6 + timing * 9);
 
-  const v = base + accent + role + variation;
+  const v = base + accent + role + phraseArc + variation;
   return Math.max(1, Math.min(127, Math.round(v)));
 }
 

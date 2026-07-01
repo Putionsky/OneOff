@@ -89,6 +89,42 @@ button.primary {
 }
 button.primary:disabled { opacity: 0.6; cursor: default; }
 
+button.ghost {
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid #3a4152;
+  border-radius: 9px;
+  padding: 0.45rem 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+button.ghost:hover { border-color: var(--accent); color: var(--accent); }
+button.ghost.recording {
+  border-color: #e0574e;
+  color: #ff7b72;
+  animation: pulse 1s ease-in-out infinite;
+}
+@keyframes pulse { 50% { opacity: 0.55; } }
+
+button.mini {
+  background: var(--panel-2);
+  color: var(--muted);
+  border: 1px solid #333a4a;
+  border-radius: 8px;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+button.mini:hover { color: var(--accent); border-color: var(--accent); }
+
+.controls-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.8rem;
+}
+.controls-header h2 { margin: 0; }
+
 .chord {
   font-size: 1.1rem;
   font-weight: 700;
@@ -168,6 +204,12 @@ button.primary:disabled { opacity: 0.6; cursor: default; }
   background: linear-gradient(180deg, #e0a05a 0%, var(--key-black-held) 100%);
 }
 .key.sounding { box-shadow: 0 0 14px 2px var(--accent-2); }
+
+/* Inferred-scale highlighting */
+.key.white.in-scale { box-shadow: inset 0 -10px 0 -6px rgba(111, 182, 255, 0.55); }
+.key.black.in-scale { box-shadow: inset 0 -8px 0 -5px rgba(111, 182, 255, 0.7); }
+.key.white.tonic { box-shadow: inset 0 -14px 0 -8px rgba(240, 168, 104, 0.9); }
+.key.black.tonic { box-shadow: inset 0 -10px 0 -6px rgba(240, 168, 104, 0.95); }
 
 .hint { color: var(--muted); font-size: 0.8rem; margin: 0.7rem 0 0; }
 

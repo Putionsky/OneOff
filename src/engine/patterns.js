@@ -74,8 +74,14 @@ function nextVoiceIndex(state, n) {
       i = (i - 1 + n) % n;
       break;
     case 'converge': {
-      // alternate outer voices moving inward, then reset outward
-      i = (i + 1) % n;
+      // Alternate between the bottom and top of the voicing, spiralling inward
+      // (0, n-1, 1, n-2, …) — a fuller two-hand-feeling figure. `pair` counts
+      // how many outer pairs we've consumed.
+      const pair = state.pair || 0;
+      const fromLow = (state.convergeLow = !state.convergeLow);
+      i = fromLow ? pair : n - 1 - pair;
+      if (!fromLow) state.pair = (pair + 1) % Math.max(1, Math.ceil(n / 2));
+      i = Math.max(0, Math.min(n - 1, i));
       break;
     }
     case 'updown':
@@ -117,7 +123,17 @@ export function generateStep(voicing, params, ctx, state, rng) {
   const voices = voicing.voices;
   const voiceCount = voices.length;
 
-  const timeCtx = { isOffbeat: offbeat, metricWeight: mw };
+  const phrasePos = ctx.phrasePos || 0; // 0..1 position within the current phrase
+  const timeCtx = { isOffbeat: offbeat, metricWeight: mw, phrasePos };
+  // Build a velocity context carrying the shared per-step feel (metric weight +
+  // phrase position) so every voice breathes with the same phrasing.
+  const vctx = (voiceRole, voiceIndex, voiceCount, weight = mw) => ({
+    metricWeight: weight,
+    voiceRole,
+    voiceIndex,
+    voiceCount,
+    phrasePos,
+  });
 
   // --- Bass (left hand) -----------------------------------------------------
   // Anchors strong beats. At low density it's a simple root-on-the-beat pulse;
@@ -132,11 +148,7 @@ export function generateStep(voicing, params, ctx, state, rng) {
   if (playBass) {
     events.push({
       midi: voicing.bass,
-      velocity: velocityFor(
-        { metricWeight: mw, voiceRole: 'bass' },
-        params,
-        rng,
-      ),
+      velocity: velocityFor(vctx('bass'), params, rng),
       timeOffsetBeats: timingOffsetBeats(timeCtx, timing, rng),
       durationBeats: durationBeats(stepBeats * (density < 0.4 ? 4 : 2), params, rng),
       role: 'bass',
@@ -161,12 +173,7 @@ export function generateStep(voicing, params, ctx, state, rng) {
       events.push({
         midi,
         velocity: velocityFor(
-          {
-            metricWeight: mw,
-            voiceRole: isTop ? 'melody' : 'inner',
-            voiceIndex: i,
-            voiceCount: used.length,
-          },
+          vctx(isTop ? 'melody' : 'inner', i, used.length),
           params,
           rng,
         ),
@@ -193,11 +200,7 @@ export function generateStep(voicing, params, ctx, state, rng) {
     const grace = approachTone(midi, embellishScale, rng);
     events.push({
       midi: grace,
-      velocity: velocityFor(
-        { metricWeight: mw * 0.6, voiceRole: 'inner', voiceIndex: 0, voiceCount: 2 },
-        params,
-        rng,
-      ),
+      velocity: velocityFor(vctx('inner', 0, 2, mw * 0.6), params, rng),
       timeOffsetBeats: timingOffsetBeats(timeCtx, timing, rng) - stepBeats * 0.35,
       durationBeats: durationBeats(stepBeats * 0.6, params, rng),
       role: 'grace',
@@ -206,16 +209,7 @@ export function generateStep(voicing, params, ctx, state, rng) {
 
   events.push({
     midi,
-    velocity: velocityFor(
-      {
-        metricWeight: mw,
-        voiceRole: isTop ? 'melody' : 'inner',
-        voiceIndex: idx,
-        voiceCount,
-      },
-      params,
-      rng,
-    ),
+    velocity: velocityFor(vctx(isTop ? 'melody' : 'inner', idx, voiceCount), params, rng),
     timeOffsetBeats: timingOffsetBeats(timeCtx, timing, rng),
     durationBeats: durationBeats(stepBeats * (density > 0.75 ? 1.4 : 2.2), params, rng),
     role: isTop ? 'melody' : 'inner',
@@ -227,11 +221,7 @@ export function generateStep(voicing, params, ctx, state, rng) {
     const harmIdx = (idx + 2) % voiceCount;
     events.push({
       midi: voices[harmIdx],
-      velocity: velocityFor(
-        { metricWeight: mw, voiceRole: 'inner', voiceIndex: harmIdx, voiceCount },
-        params,
-        rng,
-      ),
+      velocity: velocityFor(vctx('inner', harmIdx, voiceCount), params, rng),
       timeOffsetBeats: timingOffsetBeats(timeCtx, timing, rng) + 0.004,
       durationBeats: durationBeats(stepBeats * 1.4, params, rng),
       role: 'inner',

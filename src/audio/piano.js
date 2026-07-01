@@ -15,8 +15,25 @@ export class PianoSynth {
     this.ctx = null;
     this.master = null;
     this.warmth = 0.5;
+    this.stereoWidth = 0.5;  // 0 = mono, 1 = full pitch-based spread
     this.voices = new Map(); // midi -> active voice node (for note-off)
     this.pedal = true;       // sustain: let notes ring past their nominal length
+  }
+
+  setStereoWidth(w) {
+    this.stereoWidth = Math.max(0, Math.min(1, w));
+  }
+
+  // Immediately silence everything (panic / all-notes-off).
+  allNotesOff() {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    for (const v of this.voices.values()) {
+      try {
+        v.voiceGain.gain.cancelScheduledValues(t);
+        v.voiceGain.gain.setTargetAtTime(0, t, 0.02);
+      } catch (e) { /* voice already ended */ }
+    }
   }
 
   async ensureStarted() {
@@ -30,6 +47,17 @@ export class PianoSynth {
     this.master = this.ctx.createGain();
     this.master.gain.value = 0.5;
 
+    // A gentle limiter on the output so dense, wide voicings never clip — the
+    // one thing that instantly makes a synth sound cheap.
+    const limiter = this.ctx.createDynamicsCompressor();
+    limiter.threshold.value = -8;
+    limiter.knee.value = 6;
+    limiter.ratio.value = 12;
+    limiter.attack.value = 0.003;
+    limiter.release.value = 0.25;
+    this.out = limiter;
+    limiter.connect(this.ctx.destination);
+
     // Simple stereo-ish ambience: short feedback delay acting as a plate.
     const delay = this.ctx.createDelay(0.5);
     delay.delayTime.value = 0.13;
@@ -41,13 +69,13 @@ export class PianoSynth {
     damp.type = 'lowpass';
     damp.frequency.value = 3200;
 
-    this.master.connect(this.ctx.destination);
+    this.master.connect(limiter);
     this.master.connect(delay);
     delay.connect(damp);
     damp.connect(fb);
     fb.connect(delay);
     damp.connect(wet);
-    wet.connect(this.ctx.destination);
+    wet.connect(limiter);
 
     this.reverbIn = delay;
 
@@ -122,7 +150,18 @@ export class PianoSynth {
     noiseGain.connect(filter);
 
     filter.connect(voiceGain);
-    voiceGain.connect(this.master);
+    // Subtle pitch-based stereo spread — low notes lean left, high notes right,
+    // like the strings of a real piano seen from the player's seat. Widens with
+    // the "spread" performance control via setStereoWidth().
+    if (this.ctx.createStereoPanner) {
+      const panner = this.ctx.createStereoPanner();
+      const pan = Math.max(-1, Math.min(1, ((midi - 60) / 40) * this.stereoWidth));
+      panner.pan.value = pan;
+      voiceGain.connect(panner);
+      panner.connect(this.master);
+    } else {
+      voiceGain.connect(this.master);
+    }
 
     // Amplitude envelope: fast attack, exponential decay; pedal lets it ring.
     const attack = 0.004 + warmth * 0.01;

@@ -48,6 +48,13 @@ export class MidiOutput {
     this.channel = Math.max(0, Math.min(15, ch | 0));
   }
 
+  // Send All-Notes-Off / All-Sound-Off on the active channel (panic).
+  allNotesOff() {
+    if (!this.port) return;
+    this.port.send([0xb0 | this.channel, 0x7b, 0]); // all notes off
+    this.port.send([0xb0 | this.channel, 0x78, 0]); // all sound off
+  }
+
   // Schedule a note. `when` and `duration` are in seconds on the same clock as
   // performance.now()/1000; Web MIDI timestamps are in ms via performance.now.
   play(midi, velocity, whenSeconds, durationSeconds) {

@@ -46,6 +46,18 @@ Plus tempo, a sustain-pedal toggle, output routing (built-in piano or MIDI out),
 and five starting-point presets (Ballad, Flowing arpeggio, Jazz comp, Cinematic,
 Driving pop).
 
+### Performing & capturing
+
+- **Latch / hold** — keep a chord playing after you release the keys; the next
+  fresh grab starts the next chord, so you can walk a progression hands-free.
+- **Panic** — instant all-notes-off for the built-in piano and any MIDI out.
+- **Record MIDI** — capture the generated performance and download it as a
+  standard `.mid` file to drop straight into a DAW.
+- **Surprise me** — roll a fresh, musical set of controls.
+- **Inferred scale on the keyboard** — the on-screen keys light up with the
+  current key's scale tones (tonic highlighted).
+- Your controls, tempo, pedal and latch state **persist** across reloads.
+
 ## How it works
 
 A held chord becomes a performance in three stages, with a running key estimate
@@ -67,15 +79,20 @@ threaded through them:
 2. **Voice** (`src/engine/voicing.js`) — lay the chord out as keys two hands would
    actually hold: a bass anchor and a right-hand voicing, shaped by *spread*
    (close ↔ open), *warmth* (register and brightness), and *note selection*
-   (literal ↔ extended, rootless voicings at high settings).
+   (literal ↔ extended, rootless voicings at high settings). When a chord
+   changes, the new voicing is **voice-led** from the previous one — common tones
+   are held and the rest move by the smallest step, instead of jumping to a fresh
+   block each change.
 3. **Perform** (`src/engine/patterns.js` + `src/engine/humanize.js`) — walk that
    voicing over a step clock. *Density* blends a sustained block-chord texture
    into a flowing arpeggio and decides how many subdivisions sound; *timing* adds
    per-note gaussian micro-timing, swing on the off-beats, and chord rolls;
    *warmth* sets the velocity level and note length (legato vs. articulated);
    accents follow the metric grid; *note selection* sprinkles in grace/approach
-   notes. A seedable RNG (`src/engine/rng.js`) drives the human variation so a
-   performance is reproducible and testable.
+   notes. Over each four-bar **phrase** a long-breath dynamic arc swells toward
+   the middle and a slight *ritardando* eases the ending, so the part phrases
+   instead of running on a treadmill. A seedable RNG (`src/engine/rng.js`) drives
+   the human variation so a performance is reproducible and testable.
 
 `src/engine/performer.js` ties these together behind a lookahead scheduler and
 emits timed note events. It knows nothing about audio or MIDI — callers wire its
@@ -90,9 +107,10 @@ src/
     music.js       note naming, chord detection, scales, extensions
     scale.js       contextual key/scale inference (decaying K–S key-finding)
     voicing.js     chord  -> two-handed voicing (spread/warmth/selection)
-    humanize.js    timing jitter, swing, velocity dynamics, chord rolls
+    humanize.js    timing jitter, swing, velocity dynamics, chord rolls, phrasing
     patterns.js    voicing -> per-step note events (density/selection)
-    performer.js   real-time scheduler + chord state + offline render
+    midifile.js    export a captured performance as a Standard MIDI File
+    performer.js   real-time scheduler + chord state + latch + offline render
   audio/piano.js   Web Audio synthesized piano voice
   midi/input.js    Web MIDI input (chords in)
   midi/output.js   Web MIDI output (performance out to a DAW/instrument)
@@ -115,9 +133,12 @@ node --test
 ```
 
 Covers RNG determinism, chord detection, voicing behavior (bass below the right
-hand, spread widening the range, selection adding tones), and performer
-properties (valid MIDI/velocity/duration, density increasing note count, timing
-spreading notes off the grid, chord changes re-voicing).
+hand, spread widening the range, selection adding tones), **voice leading**
+(common tones held, minimal motion), **contextual key inference** (ii-V-I, minor
+ii-V-i, recency-driven key changes), **phrase dynamics**, **latch/hold**,
+**MIDI-file export** (valid SMF bytes), and performer properties (valid
+MIDI/velocity/duration, density increasing note count, timing spreading notes off
+the grid, chord changes re-voicing). 28 tests, run with `node --test`.
 
 ## Why browser-first
 

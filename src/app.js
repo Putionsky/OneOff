@@ -4,10 +4,13 @@
 
 import { Performer, DEFAULT_PARAMS } from './engine/performer.js';
 import { noteName } from './engine/music.js';
+import { notesToMidi } from './engine/midifile.js';
 import { PianoSynth } from './audio/piano.js';
 import { MidiInput } from './midi/input.js';
 import { MidiOutput } from './midi/output.js';
 import { OnScreenKeyboard } from './ui/keyboard.js';
+
+const SETTINGS_KEY = 'hpp.settings.v1';
 
 const PARAM_SPEC = [
   {
@@ -53,6 +56,11 @@ class App {
     this.monitorInput = true; // hear the raw keys you press
     this.timeOffset = 0;      // audioCtx time -> performance.now() bridge for MIDI out
 
+    this.recording = false;
+    this.recordStart = 0;
+    this.recorded = [];       // captured performance for MIDI export
+    this.saved = this.loadSettings();
+
     this.performer.onNote = (n) => this.emit(n);
 
     this.midiIn = new MidiInput({
@@ -81,6 +89,15 @@ class App {
       this.midiOut.play(n.midi, n.velocity, whenSec, n.duration);
     } else {
       this.synth.play(n.midi, n.velocity, n.time, n.duration);
+    }
+    // Capture the generated performance for MIDI export.
+    if (this.recording) {
+      this.recorded.push({
+        midi: n.midi,
+        velocity: n.velocity,
+        time: Math.max(0, n.time - this.recordStart),
+        duration: n.duration,
+      });
     }
     // Visual feedback slightly ahead of the sound.
     const lead = Math.max(0, (n.time - this.synth.now()) * 1000);
@@ -131,6 +148,40 @@ class App {
         scaleEl.style.opacity = (0.55 + Math.min(0.45, s.confidence)).toFixed(2);
       }
     }
+
+    // Paint the inferred scale onto the on-screen keyboard.
+    const s = this.performer.getScale();
+    if (this.keyboard) {
+      this.keyboard.highlightScale(s ? s.scalePcs : [], s ? s.tonic : null);
+    }
+  }
+
+  // --- Settings persistence -------------------------------------------------
+
+  loadSettings() {
+    try {
+      const raw = localStorage.getItem(SETTINGS_KEY);
+      if (!raw) return null;
+      const s = JSON.parse(raw);
+      if (s.params) this.performer.setParams(s.params);
+      if (s.bpm) this.performer.setTempo(s.bpm);
+      return s;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  saveSettings() {
+    try {
+      const pedalEl = document.getElementById('pedal');
+      const latchEl = document.getElementById('latch');
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+        params: this.performer.params,
+        bpm: this.performer.bpm,
+        pedal: pedalEl ? pedalEl.checked : true,
+        latch: latchEl ? latchEl.checked : false,
+      }));
+    } catch (e) { /* storage unavailable — ignore */ }
   }
 
   // --- Scheduler ------------------------------------------------------------
@@ -172,9 +223,12 @@ class App {
         this.performer.setParams({ [spec.key]: v });
         document.getElementById('val-' + spec.key).textContent = input.value;
         if (spec.key === 'warmth') this.synth.setWarmth(v);
+        if (spec.key === 'spread') this.synth.setStereoWidth(v);
+        this.saveSettings();
       });
     }
     this.synth.setWarmth(this.performer.params.warmth);
+    this.synth.setStereoWidth(this.performer.params.spread);
   }
 
   setAllControls(params) {
@@ -205,6 +259,7 @@ class App {
     tempo.addEventListener('input', () => {
       this.performer.setTempo(Number(tempo.value));
       tempoVal.textContent = tempo.value;
+      this.saveSettings();
     });
 
     // Presets
@@ -218,6 +273,7 @@ class App {
       tempo.value = p.bpm;
       tempoVal.textContent = p.bpm;
       this.setAllControls(p);
+      this.saveSettings();
     });
 
     // Start audio (browsers require a user gesture)
@@ -244,7 +300,87 @@ class App {
     });
 
     const pedal = document.getElementById('pedal');
-    pedal.addEventListener('change', () => { this.synth.pedal = pedal.checked; });
+    if (this.saved && this.saved.pedal != null) pedal.checked = this.saved.pedal;
+    this.synth.pedal = pedal.checked;
+    pedal.addEventListener('change', () => {
+      this.synth.pedal = pedal.checked;
+      this.saveSettings();
+    });
+
+    // Latch / hold
+    const latch = document.getElementById('latch');
+    if (this.saved && this.saved.latch != null) latch.checked = this.saved.latch;
+    this.performer.setLatch(latch.checked);
+    latch.addEventListener('change', () => {
+      this.performer.setLatch(latch.checked);
+      this.updateChordReadout();
+      this.saveSettings();
+    });
+
+    // Panic / all notes off
+    document.getElementById('panic').addEventListener('click', () => this.panic());
+
+    // Record → download a .mid of the generated performance
+    document.getElementById('record').addEventListener('click', (e) => this.toggleRecord(e.target));
+
+    // Randomize the performance controls to a fresh, musical combination
+    document.getElementById('randomize').addEventListener('click', () => this.randomize());
+
+    // Reflect any saved tempo into the slider.
+    if (this.saved && this.saved.bpm) {
+      tempo.value = this.performer.bpm;
+      tempoVal.textContent = this.performer.bpm;
+    }
+  }
+
+  panic() {
+    this.performer.clear();
+    if (this.synth.allNotesOff) this.synth.allNotesOff();
+    if (this.useMidiOut) this.midiOut.allNotesOff && this.midiOut.allNotesOff();
+    this.updateChordReadout();
+  }
+
+  toggleRecord(btn) {
+    if (!this.recording) {
+      this.recording = true;
+      this.recorded = [];
+      this.recordStart = this.synth.now();
+      btn.textContent = '■ Stop & save';
+      btn.classList.add('recording');
+    } else {
+      this.recording = false;
+      btn.textContent = '● Record MIDI';
+      btn.classList.remove('recording');
+      this.downloadMidi();
+    }
+  }
+
+  downloadMidi() {
+    if (!this.recorded.length) return;
+    const bytes = notesToMidi(this.recorded, { bpm: this.performer.bpm });
+    const blob = new Blob([bytes], { type: 'audio/midi' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `piano-performance-${Date.now()}.mid`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  randomize() {
+    // Musically sensible ranges — never fully robotic, never total chaos.
+    const r = (min, max) => min + Math.random() * (max - min);
+    const params = {
+      density: r(0.2, 0.9),
+      timing: r(0.25, 0.8),
+      warmth: r(0.3, 0.9),
+      spread: r(0.2, 0.9),
+      selection: r(0.2, 0.8),
+    };
+    this.setAllControls(params);
+    this.saveSettings();
   }
 
   async connectMidi() {

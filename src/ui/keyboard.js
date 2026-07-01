@@ -99,6 +99,17 @@ export class OnScreenKeyboard {
     this.onNoteOff(midi);
   }
 
+  // Tint the keys that belong to the inferred scale, and mark its tonic, so the
+  // player can see the tonal space the engine is moving through.
+  highlightScale(scalePcs, rootPc) {
+    const set = new Set(scalePcs || []);
+    for (const [midi, el] of this.keyEls) {
+      const pc = ((midi % 12) + 12) % 12;
+      el.classList.toggle('in-scale', set.has(pc));
+      el.classList.toggle('tonic', rootPc != null && pc === rootPc);
+    }
+  }
+
   // Visually flash a key when the engine itself sounds a note.
   flash(midi) {
     const el = this.keyEls.get(midi);

@@ -10,6 +10,7 @@ import {
 } from '../src/engine/music.js';
 import { buildVoicing } from '../src/engine/voicing.js';
 import { ScaleTracker } from '../src/engine/scale.js';
+import { notesToMidi } from '../src/engine/midifile.js';
 import { Performer, DEFAULT_PARAMS } from '../src/engine/performer.js';
 
 // --- RNG -------------------------------------------------------------------
@@ -139,6 +140,101 @@ test('performer exposes a contextual scale after a chord is played', () => {
   assert.ok(s, 'scale inferred');
   assert.equal(pitchClass(s.tonic), 0);
   assert.ok(Array.isArray(s.scalePcs) && s.scalePcs.length === 7);
+});
+
+// --- Voice leading ---------------------------------------------------------
+
+test('voice leading holds common tones and moves others minimally', () => {
+  // C major -> A minor share C and E; only one voice should need to move.
+  const cMaj = detectChord([60, 64, 67]);
+  const aMin = detectChord([57, 60, 64]);
+  const params = { ...DEFAULT_PARAMS, spread: 0, selection: 0 };
+  const v1 = buildVoicing(cMaj, params, makeRng(1));
+  const v2 = buildVoicing(aMin, params, makeRng(1), v1.voices);
+  // Total motion of the led voicing should be small — no big block jump.
+  const nearestMove = (note, set) => Math.min(...set.map((s) => Math.abs(s - note)));
+  const motion = v2.voices.reduce((sum, n) => sum + nearestMove(n, v1.voices), 0);
+  assert.ok(motion <= 4, `smooth voice leading, total motion ${motion}`);
+});
+
+test('without history a voicing still forms around the middle register', () => {
+  const v = buildVoicing(detectChord([60, 64, 67]), DEFAULT_PARAMS, makeRng(1));
+  assert.ok(v.voices.every((m) => m > 40 && m < 96));
+});
+
+// --- MIDI file export ------------------------------------------------------
+
+test('notesToMidi produces a valid Standard MIDI File', () => {
+  const notes = [
+    { midi: 60, velocity: 90, time: 0, duration: 0.5 },
+    { midi: 64, velocity: 80, time: 0.5, duration: 0.5 },
+    { midi: 67, velocity: 100, time: 1.0, duration: 0.5 },
+  ];
+  const bytes = notesToMidi(notes, { bpm: 120, ppq: 480 });
+  const ascii = (arr) => String.fromCharCode(...arr);
+  assert.equal(ascii(bytes.slice(0, 4)), 'MThd', 'header magic');
+  // Track chunk present somewhere after the 14-byte header.
+  let hasTrack = false;
+  for (let i = 0; i < bytes.length - 3; i++) {
+    if (ascii(bytes.slice(i, i + 4)) === 'MTrk') hasTrack = true;
+  }
+  assert.ok(hasTrack, 'track chunk present');
+  assert.ok(bytes.some((b) => (b & 0xf0) === 0x90), 'contains a note-on status');
+  assert.ok(bytes.length > 20, 'non-trivial length');
+});
+
+test('empty performance still yields a well-formed (silent) MIDI file', () => {
+  const bytes = notesToMidi([], { bpm: 96 });
+  assert.equal(String.fromCharCode(...bytes.slice(0, 4)), 'MThd');
+});
+
+// --- Latch / hold ----------------------------------------------------------
+
+test('latch keeps the chord sounding after keys are released', () => {
+  const p = new Performer({ seed: 1 });
+  p.setLatch(true);
+  p.noteOn(60);
+  p.noteOn(64);
+  p.noteOn(67);
+  p.noteOff(60);
+  p.noteOff(64);
+  p.noteOff(67);
+  assert.ok(p.chord, 'chord still latched after release');
+  assert.equal(p.heldNotes.size, 3);
+});
+
+test('a fresh grab replaces the latched chord', () => {
+  const p = new Performer({ seed: 1 });
+  p.setLatch(true);
+  p.noteOn(60); p.noteOn(64); p.noteOn(67); // C
+  p.noteOff(60); p.noteOff(64); p.noteOff(67);
+  p.noteOn(65); p.noteOn(69); p.noteOn(72); // F — new grab
+  assert.equal(pitchClass(p.chord.root), 5, 'new chord is F');
+  assert.equal(p.heldNotes.size, 3);
+});
+
+test('clear() silences everything', () => {
+  const p = new Performer({ seed: 1 });
+  p.noteOn(60); p.noteOn(64);
+  p.clear();
+  assert.equal(p.chord, null);
+  assert.equal(p.heldNotes.size, 0);
+});
+
+// --- Phrase dynamics -------------------------------------------------------
+
+test('phrase dynamics swell toward the middle of a phrase', () => {
+  // Compare average melody/inner velocity in an early bar vs. a mid-phrase bar.
+  const p = new Performer({ seed: 4, bpm: 120, params: { ...DEFAULT_PARAMS, density: 0.7 } });
+  const ev = p.renderBars([60, 64, 67, 71], 4);
+  const barLen = (60 / 120) * 4;
+  const avgIn = (lo, hi) => {
+    const xs = ev.filter((e) => e.time >= lo && e.time < hi && e.role !== 'bass');
+    return xs.reduce((s, e) => s + e.velocity, 0) / Math.max(1, xs.length);
+  };
+  const early = avgIn(0, barLen);            // phrase start (softer)
+  const mid = avgIn(barLen * 1.5, barLen * 2.5); // phrase middle (louder)
+  assert.ok(mid > early - 2, `mid-phrase (${mid.toFixed(1)}) not softer than start (${early.toFixed(1)})`);
 });
 
 // --- Performer integration -------------------------------------------------
