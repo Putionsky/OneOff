@@ -9,9 +9,6 @@ viewers (SuperSplat, antimatter15/splat, gsplat, ...).
 
 from __future__ import annotations
 
-import io
-import struct
-
 import numpy as np
 from scipy.spatial import cKDTree
 
@@ -81,17 +78,30 @@ def gaussian_ply(xyz: np.ndarray, rgb: np.ndarray) -> bytes:
     return header + data.tobytes()
 
 
-def splat_binary(xyz: np.ndarray, rgb: np.ndarray) -> bytes:
-    """antimatter15 .splat: 32 bytes per gaussian, sorted big-to-small."""
+def splat_binary(xyz: np.ndarray, rgb: np.ndarray,
+                 scales: np.ndarray | None = None,
+                 rots: np.ndarray | None = None,
+                 opacity: np.ndarray | None = None) -> bytes:
+    """antimatter15 .splat: 32 bytes per gaussian, sorted big-to-small.
+
+    Full gaussian attributes are used when given (scales (N,3) linear,
+    rots (N,4) w-first quaternion, opacity (N,) in [0,1]); otherwise
+    isotropic gaussians are initialized from the point spacing.
+    """
     n = len(xyz)
-    scales = _knn_scales(xyz)
-    order = np.argsort(-scales)  # the reference viewer expects large splats first
-    buf = io.BytesIO()
-    alpha = int(DEFAULT_OPACITY * 255)
-    quat = struct.pack("4B", 255, 128, 128, 128)  # identity (w,x,y,z) * 128 + 128
-    for i in order:
-        buf.write(struct.pack("3f", *xyz[i]))
-        buf.write(struct.pack("3f", scales[i], scales[i], scales[i]))
-        buf.write(struct.pack("4B", int(rgb[i, 0]), int(rgb[i, 1]), int(rgb[i, 2]), alpha))
-        buf.write(quat)
-    return buf.getvalue()
+    if scales is None:
+        scales = np.repeat(_knn_scales(xyz)[:, None], 3, axis=1)
+    if rots is None:
+        rots = np.tile(np.array([1, 0, 0, 0], np.float32), (n, 1))
+    if opacity is None:
+        opacity = np.full(n, DEFAULT_OPACITY, np.float32)
+
+    order = np.argsort(-(scales.mean(axis=1) * opacity))  # big/opaque first
+    rec = np.zeros(n, dtype=[("pos", "<f4", 3), ("scale", "<f4", 3),
+                             ("rgba", "u1", 4), ("quat", "u1", 4)])
+    rec["pos"] = xyz[order]
+    rec["scale"] = scales[order]
+    rec["rgba"][:, :3] = rgb[order]
+    rec["rgba"][:, 3] = np.clip(opacity[order] * 255, 0, 255)
+    rec["quat"] = np.clip(rots[order] * 128 + 128, 0, 255)
+    return rec.tobytes()

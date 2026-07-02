@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { OrbitControls } from "/static/vendor/OrbitControls.js";
+import * as GaussianSplats3D from "/static/vendor/gaussian-splats-3d.module.js";
 
 /* ---------------------------------------------------------------- scene */
 
@@ -277,9 +278,13 @@ function applyStatus(s) {
   const canSave = s.state === "ready" && s.n_points > 0;
   el("btn-save-pc").disabled = !canSave;
   el("btn-save-splat").disabled = !canSave;
-  if (s.state === "error" && s.detail) toast(s.detail, 6000);
+  el("mode-splats").disabled = !canSave;
+  if (s.state === "error" && s.detail) toast(s.detail, 9000);
   if (s.state === "ready") el("drop-hint").classList.add("hidden");
+  if (canSave && lastState !== "ready") setMode("splats");  // once, on completion
+  lastState = s.state;
 }
+let lastState = "idle";
 
 function resetScene() {
   nPoints = 0;
@@ -287,6 +292,11 @@ function resetScene() {
   camPoses.length = 0;
   trail.clear();
   userMoved = false;
+  disposeSplats();
+  points.visible = true;
+  el("mode-points").classList.add("active");
+  el("mode-splats").classList.remove("active");
+  el("mode-splats").disabled = true;
   el("stat-points").textContent = "0";
   el("stat-cams").textContent = "0";
 }
@@ -350,7 +360,61 @@ el("size-slider").addEventListener("input", e => {
   material.uniforms.uSizeMult.value = parseFloat(e.target.value);
 });
 
-window.__studio = { camera, controls, setView, material, geometry };  // for tests and debugging
+/* ------------------------------------------------------- render modes */
+
+// "Points" is the live streaming view; "Gaussians" loads the exported 3DGS
+// scene into a real splat renderer (sorted, blended) once the scene is ready.
+let splatViewer = null;
+let splatLoading = false;
+
+function disposeSplats() {
+  if (splatViewer) {
+    scene.remove(splatViewer);
+    try { splatViewer.dispose(); } catch { /* worker teardown is best-effort */ }
+    splatViewer = null;
+  }
+}
+
+async function setMode(mode) {
+  el("mode-points").classList.toggle("active", mode === "points");
+  el("mode-splats").classList.toggle("active", mode === "splats");
+  if (mode === "points") {
+    disposeSplats();
+    points.visible = true;
+    return;
+  }
+  if (splatLoading) return;
+  splatLoading = true;
+  try {
+    disposeSplats();
+    toast("Loading gaussian scene…");
+    splatViewer = new GaussianSplats3D.DropInViewer({
+      sharedMemoryForWorkers: false,
+      freeIntermediateSplatData: true,
+      sceneRevealMode: GaussianSplats3D.SceneRevealMode.Instant,
+    });
+    await splatViewer.addSplatScene(
+      `/api/export/scene_3dgs.ply?t=${Date.now()}`,
+      { format: GaussianSplats3D.SceneFormat.Ply, showLoadingUI: false });
+    scene.add(splatViewer);
+    window.__splat = splatViewer;
+    points.visible = false;
+    toast("Gaussian render ready");
+  } catch (err) {
+    toast(`Gaussian render failed: ${err.message ?? err}`, 5000);
+    disposeSplats();
+    points.visible = true;
+    el("mode-points").classList.add("active");
+    el("mode-splats").classList.remove("active");
+  } finally {
+    splatLoading = false;
+  }
+}
+
+el("mode-points").addEventListener("click", () => setMode("points"));
+el("mode-splats").addEventListener("click", () => setMode("splats"));
+
+window.__studio = { camera, controls, setView, material, geometry, points };  // for tests and debugging
 
 /* ------------------------------------------------------------ websocket */
 

@@ -1,12 +1,16 @@
 # OneOff Splat Studio
 
-Ricostruzione 3D da video, **in locale e in tempo reale**: carichi un video,
-guardi la scena crescere nel viewer 3D mentre viene elaborata, e salvi il
-risultato come point cloud o Gaussian splat.
+Ricostruzione 3D **in locale**: carichi un video (o una foto), guardi la scena
+crescere nel viewer 3D mentre viene elaborata, e salvi il risultato come point
+cloud o Gaussian splat.
 
-Riproduzione dell'applicativo mostrato nel reel Instagram (Lingbot Studio):
-video in ingresso → point cloud / splat in uscita, tutto sul proprio computer,
-senza GPU e senza servizi cloud.
+Riproduzione dell'applicativo mostrato nel reel Instagram (Lingbot Studio),
+con due motori di ricostruzione:
+
+| Input | Motore | Note |
+|---|---|---|
+| **Video** | SfM incrementale (OpenCV) | zero dipendenze pesanti, niente GPU, in tempo reale |
+| **Foto** | [Apple SHARP](https://github.com/apple/ml-sharp) | gaussiane fotorealistiche da una singola immagine; va installato a parte (vedi sotto) |
 
 ![OneOff Splat Studio](docs/screenshot.png)
 
@@ -22,6 +26,40 @@ Si apre il browser su `http://127.0.0.1:8765`. Trascina un video nel viewport
 camera arrivano nel viewer in streaming via WebSocket mentre il video viene
 ancora processato, all'incirca in tempo reale (dipende dalla CPU; la densità è
 regolabile con `Config.densify_stride`).
+
+## Motore SHARP per le foto (opzionale, consigliato)
+
+[SHARP](https://github.com/apple/ml-sharp) di Apple genera gaussiane 3D
+fotorealistiche da una **singola immagine**. Per abilitarlo (serve PyTorch;
+al primo avvio scarica i pesi da Hugging Face):
+
+```bash
+pip install "git+https://github.com/apple/ml-sharp.git"
+```
+
+Fatto questo, trascina una foto (jpg/png/…) nell'app: viene processata con
+SHARP e il risultato appare nel viewer già in qualità gaussiana. L'export
+**Save Splat… → 3DGS (.ply)** restituisce l'output SHARP integrale (gaussiane
+anisotrope + opacità), senza rielaborazioni.
+
+Se il tuo binario SHARP ha un'interfaccia diversa, il comando è configurabile:
+
+```bash
+SHARP_CMD='sharp predict -i {input} -o {output_dir}' python -m splat_studio
+```
+
+qualunque strumento immagine→3DGS che scriva un `.ply` va bene.
+
+## Render Mode: Points vs Gaussians
+
+Nel pannello destro puoi scegliere come visualizzare la scena:
+
+- **Points** — vista live durante l'elaborazione: dischi dimensionati sulla
+  spaziatura locale, leggerissima;
+- **Gaussians** — rendering 3DGS vero (splat ellittici ordinati e fusi con
+  alpha blending) tramite
+  [gaussian-splats-3d](https://github.com/mkkellogg/GaussianSplats3D) (MIT,
+  vendorizzato). Si attiva da solo appena la scena è pronta.
 
 ## Cosa fa
 
@@ -67,10 +105,12 @@ si può triangolare struttura — in quel caso l'app lo segnala.
 
 ```
 splat_studio/          backend Python
-  pipeline.py          SfM incrementale (LK → essential/PnP → triangolazione)
+  pipeline.py          SfM incrementale (LK → essential/PnP → triangolazione + densify)
+  sharp_engine.py      adapter CLI per Apple SHARP (foto → gaussiane)
+  gsply.py             reader PLY 3DGS (output SHARP e affini)
   jobs.py              job manager + buffering per lo streaming WebSocket
   export.py            exporter PLY / 3DGS PLY / .splat
   server.py            FastAPI: upload, WebSocket, export
   __main__.py          entry point (python -m splat_studio)
-frontend/              viewer (HTML/CSS/JS + Three.js vendorizzato)
+frontend/              viewer (HTML/CSS/JS; vendorizzati: three.js, gaussian-splats-3d)
 ```

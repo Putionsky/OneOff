@@ -73,16 +73,28 @@ async def ws(sock: WebSocket):
 
 
 def _export(kind: str):
-    scene = jobs.scene()
-    if scene is None:
+    data = jobs.export_data()
+    if data is None:
         return JSONResponse({"error": "scene not ready"}, status_code=409)
-    xyz, rgb = export.clean_outliers(*scene)
-    if kind == "pointcloud":
-        body, name = export.pointcloud_ply(xyz, rgb), "pointcloud.ply"
-    elif kind == "splat_ply":
-        body, name = export.gaussian_ply(xyz, rgb), "scene_3dgs.ply"
+
+    gs = data["gaussians"]
+    if gs is not None:  # SHARP scene: real gaussians, no statistical cleanup
+        if kind == "pointcloud":
+            body, name = export.pointcloud_ply(gs.xyz, gs.rgb), "pointcloud.ply"
+        elif kind == "splat_ply":
+            body, name = data["raw_gs_ply"], "scene_3dgs.ply"  # untouched output
+        else:
+            body = export.splat_binary(gs.xyz, gs.rgb, gs.scales, gs.rots, gs.opacity)
+            name = "scene.splat"
     else:
-        body, name = export.splat_binary(xyz, rgb), "scene.splat"
+        xyz, rgb = export.clean_outliers(data["xyz"], data["rgb"])
+        if kind == "pointcloud":
+            body, name = export.pointcloud_ply(xyz, rgb), "pointcloud.ply"
+        elif kind == "splat_ply":
+            body, name = export.gaussian_ply(xyz, rgb), "scene_3dgs.ply"
+        else:
+            body, name = export.splat_binary(xyz, rgb), "scene.splat"
+
     out = WORKDIR / name
     out.write_bytes(body)  # also kept on disk for "Show in Finder"
     return Response(body, media_type="application/octet-stream",

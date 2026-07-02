@@ -8,11 +8,13 @@ import base64
 import struct
 import threading
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import cv2
 import numpy as np
 from scipy.spatial import cKDTree
 
+from . import gsply, sharp_engine
 from .pipeline import Callbacks, Config, VideoReconstructor
 
 CHUNK_POINTS = 1        # legacy: xyz + rgb
@@ -77,6 +79,7 @@ def encode_camera(T_wc: np.ndarray) -> bytes:
 @dataclass
 class JobState:
     state: str = "idle"            # idle | processing | ready | error
+    engine: str = "sfm"            # sfm (video) | sharp (photo)
     detail: str = ""
     progress: float = 0.0
     n_points: int = 0
@@ -86,6 +89,8 @@ class JobState:
     status_version: int = 0
     xyz: np.ndarray | None = None
     rgb: np.ndarray | None = None
+    gaussians: gsply.GaussianScene | None = None    # full attrs (sharp engine)
+    raw_gs_ply: bytes | None = None                 # untouched SHARP output
 
 
 class JobManager:
@@ -98,16 +103,18 @@ class JobManager:
 
     # ------------------------------------------------------------------ #
 
-    def start(self, video_path: str):
+    def start(self, media_path: str):
         self.cancel()
+        is_image = Path(media_path).suffix.lower() in sharp_engine.IMAGE_EXTS
+        engine = "sharp" if is_image else "sfm"
         with self.lock:
             self._generation += 1
             gen = self._generation
-            self.job = JobState(state="processing", detail="starting")
+            self.job = JobState(state="processing", detail="starting", engine=engine)
             self.job.status_version = 1
         self._stop.clear()
-        self._thread = threading.Thread(
-            target=self._worker, args=(video_path, gen), daemon=True)
+        target = self._worker_sharp if is_image else self._worker
+        self._thread = threading.Thread(target=target, args=(media_path, gen), daemon=True)
         self._thread.start()
 
     def cancel(self):
@@ -189,6 +196,76 @@ class JobManager:
 
     # ------------------------------------------------------------------ #
 
+    def _worker_sharp(self, image_path: str, gen: int):
+        """Photo -> gaussians through the SHARP CLI adapter."""
+
+        def set_status(state=None, detail=None, progress=None):
+            with self.lock:
+                if gen != self._generation:
+                    return
+                if state:
+                    self.job.state = state
+                if detail is not None:
+                    self.job.detail = detail
+                if progress is not None:
+                    self.job.progress = progress
+                self.job.status_version += 1
+
+        try:
+            img = cv2.imread(image_path)
+            if img is None:
+                raise RuntimeError(f"cannot read image: {image_path}")
+            h, w = img.shape[:2]
+            thumb = cv2.resize(img, (320, max(1, int(h * 320.0 / w))))
+            ok, jpg = cv2.imencode(".jpg", thumb, [cv2.IMWRITE_JPEG_QUALITY, 70])
+            if ok:
+                with self.lock:
+                    if gen != self._generation:
+                        return
+                    self.job.frame_jpg_b64 = base64.b64encode(jpg.tobytes()).decode("ascii")
+                    self.job.frame_version += 1
+
+            if not sharp_engine.available():
+                raise RuntimeError(sharp_engine.install_hint())
+
+            set_status(detail="running SHARP", progress=0.15)
+            out_dir = Path(image_path).parent / "sharp_out"
+            ply_path = sharp_engine.run(image_path, out_dir)
+
+            set_status(detail="loading gaussians", progress=0.8)
+            raw = ply_path.read_bytes()
+            scene = gsply.read(raw)
+
+            # stream to the viewer as disc splats; drop near-invisible ones
+            visible = scene.opacity > 0.05
+            xyz, rgb = scene.xyz[visible], scene.rgb[visible]
+            radii = np.clip(
+                np.cbrt(np.prod(scene.scales[visible], axis=1)),  # geometric mean
+                1e-6, np.percentile(scene.scales[visible], 97))
+            for i in range(0, len(xyz), 100_000):
+                if gen != self._generation:
+                    return
+                sl = slice(i, i + 100_000)
+                frame = encode_points(xyz[sl], rgb[sl], radii[sl].astype(np.float32))
+                with self.lock:
+                    if gen != self._generation:
+                        return
+                    self.job.chunks.append(frame)
+                    self.job.n_points += len(xyz[sl])
+                    self.job.status_version += 1
+
+            with self.lock:
+                if gen != self._generation:
+                    return
+                self.job.xyz, self.job.rgb = xyz, rgb
+                self.job.gaussians = scene
+                self.job.raw_gs_ply = raw
+            set_status(state="ready", detail="", progress=1.0)
+        except Exception as exc:
+            set_status(state="error", detail=str(exc))
+
+    # ------------------------------------------------------------------ #
+
     def snapshot_status(self) -> dict:
         with self.lock:
             j = self.job
@@ -196,6 +273,7 @@ class JobManager:
                 "type": "status", "state": j.state, "detail": j.detail,
                 "progress": j.progress, "n_points": j.n_points,
                 "version": j.status_version, "generation": self._generation,
+                "engine": j.engine,
             }
 
     def snapshot_frame(self) -> dict | None:
@@ -210,8 +288,10 @@ class JobManager:
             chunks = self.job.chunks[cursor:]
             return chunks, len(self.job.chunks)
 
-    def scene(self):
+    def export_data(self) -> dict | None:
         with self.lock:
-            if self.job.state != "ready" or self.job.xyz is None:
+            j = self.job
+            if j.state != "ready" or j.xyz is None:
                 return None
-            return self.job.xyz, self.job.rgb
+            return {"engine": j.engine, "xyz": j.xyz, "rgb": j.rgb,
+                    "gaussians": j.gaussians, "raw_gs_ply": j.raw_gs_ply}

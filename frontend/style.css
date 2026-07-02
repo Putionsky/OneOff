@@ -126,6 +126,15 @@ html, body {
 
 .view-btns { display: flex; flex-direction: column; gap: 5px; }
 .slider { width: 100%; accent-color: #2f7cf6; }
+
+.mode-row { display: flex; border: 1px solid #cfcfd4; border-radius: 6px; overflow: hidden; }
+.mode-btn {
+  flex: 1; border: none; background: #fff; padding: 5px 0;
+  font-size: 12px; cursor: pointer; color: #3a3a3c;
+}
+.mode-btn + .mode-btn { border-left: 1px solid #cfcfd4; }
+.mode-btn.active { background: #2f7cf6; color: #fff; }
+.mode-btn:disabled { opacity: .45; cursor: default; }
 .stats { font-size: 11px; color: #8e8e93; margin-top: auto; }
 
 /* ---------- helper bar ---------- */
