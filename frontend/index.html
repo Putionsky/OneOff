@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>OneOff Splat Studio</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/static/style.css">
+<script type="importmap">
+{ "imports": { "three": "/static/vendor/three.module.js" } }
+</script>
+</head>
+<body>
+<div class="window">
+  <div class="titlebar">
+    <div class="traffic"><span class="tl red"></span><span class="tl yellow"></span><span class="tl green"></span></div>
+    <div class="title">OneOff Splat Studio</div>
+    <div class="title-status"><span id="title-dot" class="dot"></span><span id="title-state">Waiting for video</span></div>
+  </div>
+
+  <div class="toolbar">
+    <div id="scene-state" class="scene-state">Waiting for video</div>
+    <div class="toolbar-actions">
+      <button id="btn-new" class="btn plain">New Video</button>
+      <button id="btn-reveal" class="btn plain">Show in Finder</button>
+      <button id="btn-save-pc" class="btn tinted" disabled>Save Point Cloud…</button>
+      <button id="btn-save-splat" class="btn primary" disabled>Save Splat…</button>
+    </div>
+  </div>
+  <div id="progress" class="progress"><div id="progress-fill"></div></div>
+
+  <div class="main">
+    <div id="viewport" class="viewport">
+      <div id="drop-hint" class="drop-hint">
+        <div class="drop-hint-icon">🎥</div>
+        <div class="drop-hint-title">Drop a video here</div>
+        <div class="drop-hint-sub">or click <b>New Video</b> — the scene is reconstructed locally, in real time</div>
+      </div>
+      <div id="toast" class="toast"></div>
+    </div>
+
+    <div class="sidebar">
+      <div class="side-header">
+        <span class="conn"><span id="conn-dot" class="conn-icon">⟳</span><span id="conn-label">Connecting…</span></span>
+        <span class="side-icons">⤴ ⛶</span>
+      </div>
+
+      <button id="btn-up" class="side-btn">Reset up direction</button>
+
+      <div class="section">
+        <div class="section-title">Video Display <span class="chev">⌄</span></div>
+        <label class="check"><input type="checkbox" id="chk-frame" checked> Show Current<br>Frame</label>
+        <div class="frame-label">Current Frame</div>
+        <img id="current-frame" class="current-frame" alt="" draggable="false">
+      </div>
+
+      <div class="section">
+        <div class="section-title">Reset View Direction <span class="chev">⌄</span></div>
+        <div class="view-btns">
+          <button class="side-btn" data-view="center">Look At Scene Center</button>
+          <button class="side-btn" data-view="overview">Overview</button>
+          <button class="side-btn" data-view="front">Front (+Z)</button>
+          <button class="side-btn" data-view="back">Back (-Z)</button>
+          <button class="side-btn" data-view="left">Left (+X)</button>
+          <button class="side-btn" data-view="right">Right (-X)</button>
+          <button class="side-btn" data-view="top">Top (-Y)</button>
+          <button class="side-btn" data-view="bottom">Bottom (+Y)</button>
+        </div>
+      </div>
+
+      <div class="section stats">
+        <div><span id="stat-points">0</span> points · <span id="stat-cams">0</span> keyframes</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="helpbar">Drag to orbit · scroll to zoom · right-drag to pan · use <b>Top (-Y)</b> in the side panel for a bird's-eye view · <b>Scene helpers</b> has the ground grid</div>
+</div>
+
+<input type="file" id="file-input" accept="video/*" hidden>
+<div id="splat-menu" class="menu hidden">
+  <div class="menu-item" data-fmt="scene_3dgs.ply">3D Gaussian Splatting (.ply)</div>
+  <div class="menu-item" data-fmt="scene.splat">antimatter15 (.splat)</div>
+</div>
+
+<script type="module" src="/static/app.js"></script>
+</body>
+</html>
