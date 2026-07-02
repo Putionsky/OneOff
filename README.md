@@ -20,7 +20,8 @@ python -m splat_studio
 Si apre il browser su `http://127.0.0.1:8765`. Trascina un video nel viewport
 (o usa **New Video**) e la ricostruzione parte subito: i punti e le pose della
 camera arrivano nel viewer in streaming via WebSocket mentre il video viene
-ancora processato (~100 fps su un laptop, più veloce del playback).
+ancora processato, all'incirca in tempo reale (dipende dalla CPU; la densità è
+regolabile con `Config.densify_stride`).
 
 ## Cosa fa
 
@@ -32,7 +33,11 @@ ancora processato (~100 fps su un laptop, più veloce del playback).
   - localizzazione dei keyframe successivi con PnP RANSAC sui landmark già
     triangolati;
   - triangolazione di nuovi landmark tra keyframe consecutivi, con filtri su
-    cheiralità, errore di riproiezione e parallasse.
+    cheiralità, errore di riproiezione e parallasse;
+  - **densificazione**: note le pose, tra ogni coppia di keyframe viene
+    triangolata anche una griglia fitta di pixel con texture (uno ogni 3 px,
+    fino a ~14k punti per keyframe) — è ciò che porta la nuvola a centinaia
+    di migliaia di punti.
 - **Viewer 3D live** — `frontend/` (Three.js, vendorizzato: funziona offline)
   - point cloud che cresce in tempo reale, scia dei frustum camera,
     griglia di terra, gizmo degli assi;

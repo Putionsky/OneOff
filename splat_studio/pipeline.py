@@ -46,6 +46,13 @@ class Config:
     frame_stride: int = 1
     max_points_per_kf: int = 4000
     thumb_every_n_frames: int = 6
+    # dense triangulation between keyframes, once the pose is known
+    densify: bool = True
+    densify_stride: int = 3           # sample one candidate pixel every N px
+    densify_grad_thresh: float = 18.0  # minimum Sobel magnitude to be a candidate
+    densify_max_per_kf: int = 14000
+    densify_max_reproj: float = 1.5   # px, tighter than the sparse map
+    max_total_points: int = 1_500_000
 
 
 @dataclass
@@ -169,6 +176,8 @@ class VideoReconstructor:
                     continue
                 self._triangulate_new(tracks, K, kf_pose, pose, landmarks, frame, result)
 
+            if cfg.densify:
+                self._densify(kf_gray, gray, frame, K, kf_pose, pose, result)
             kf_pose = pose
             kf_gray = gray
             for t in tracks:
@@ -276,12 +285,13 @@ class VideoReconstructor:
         if sel.sum() >= 8:
             self._add_landmarks(tracks, sel, K, pose_a, pose_b, frame, landmarks, result)
 
-    def _add_landmarks(self, tracks, sel, K, pose_a, pose_b, frame, landmarks, result):
-        """Triangulate selected tracks between two keyframe poses, filter and emit."""
+    def _triangulate_filtered(self, pa, pb, K, pose_a, pose_b, max_reproj):
+        """Triangulate 2D correspondences between two poses.
+
+        Returns the world points and a validity mask (cheirality, reprojection
+        error in both views, parallax, and far-field depth clipping).
+        """
         cfg = self.cfg
-        idxs = np.flatnonzero(sel)
-        pa = np.array([tracks[i].kf_pt for i in idxs], np.float64)
-        pb = np.array([tracks[i].pt for i in idxs], np.float64)
         Pa, Pb = K @ pose_a, K @ pose_b
         Xh = cv2.triangulatePoints(Pa, Pb, pa.T, pb.T)
         X = (Xh[:3] / np.where(np.abs(Xh[3]) < 1e-12, 1e-12, Xh[3])).T  # (N,3) world
@@ -292,22 +302,38 @@ class VideoReconstructor:
         Xb = X @ Rb.T + tb
         good = (Xa[:, 2] > 1e-3) & (Xb[:, 2] > 1e-3)
 
-        # reprojection error in both views
         ra = Xa[:, :2] / Xa[:, 2:3] * K[0, 0] + K[:2, 2]
         rb = Xb[:, :2] / Xb[:, 2:3] * K[0, 0] + K[:2, 2]
-        good &= np.linalg.norm(ra - pa, axis=1) < cfg.max_reproj_err
-        good &= np.linalg.norm(rb - pb, axis=1) < cfg.max_reproj_err
+        good &= np.linalg.norm(ra - pa, axis=1) < max_reproj
+        good &= np.linalg.norm(rb - pb, axis=1) < max_reproj
 
-        # parallax between the two rays
         Ca, Cb = -Ra.T @ ta, -Rb.T @ tb
         va, vb = X - Ca, X - Cb
         cosang = np.sum(va * vb, axis=1) / (
             np.linalg.norm(va, axis=1) * np.linalg.norm(vb, axis=1) + 1e-12)
         good &= np.degrees(np.arccos(np.clip(cosang, -1, 1))) > cfg.min_parallax_deg
 
-        # clip far-field outliers relative to this pair's median depth
         med_depth = np.median(Xb[good, 2]) if good.any() else 1.0
         good &= Xb[:, 2] < med_depth * 12
+        return X, good
+
+    def _emit(self, X, keep, pb, frame, result):
+        """Color the kept points from the current frame and stream them out."""
+        h, w = frame.shape[:2]
+        new_xyz = X[keep].astype(np.float32)
+        px = np.clip(np.round(pb[keep]).astype(int), [0, 0], [w - 1, h - 1])
+        new_rgb = frame[px[:, 1], px[:, 0], ::-1].copy()  # BGR -> RGB
+        result.xyz = np.vstack([result.xyz, new_xyz])
+        result.rgb = np.vstack([result.rgb, new_rgb])
+        self.cb.on_points(new_xyz, new_rgb)
+
+    def _add_landmarks(self, tracks, sel, K, pose_a, pose_b, frame, landmarks, result):
+        """Triangulate selected tracks between two keyframe poses, filter and emit."""
+        cfg = self.cfg
+        idxs = np.flatnonzero(sel)
+        pa = np.array([tracks[i].kf_pt for i in idxs], np.float64)
+        pb = np.array([tracks[i].pt for i in idxs], np.float64)
+        X, good = self._triangulate_filtered(pa, pb, K, pose_a, pose_b, cfg.max_reproj_err)
 
         keep = np.flatnonzero(good)
         if len(keep) > cfg.max_points_per_kf:
@@ -315,19 +341,54 @@ class VideoReconstructor:
         if len(keep) == 0:
             return
 
-        h, w = frame.shape[:2]
-        new_xyz = X[keep].astype(np.float32)
-        px = np.clip(np.round(pb[keep]).astype(int), [0, 0], [w - 1, h - 1])
-        new_rgb = frame[px[:, 1], px[:, 0], ::-1].copy()  # BGR -> RGB
-
         base = len(landmarks)
         for j, k in enumerate(keep):
             landmarks.append(X[k])
             tracks[idxs[k]].landmark = base + j
+        self._emit(X, keep, pb, frame, result)
 
-        result.xyz = np.vstack([result.xyz, new_xyz])
-        result.rgb = np.vstack([result.rgb, new_rgb])
-        self.cb.on_points(new_xyz, new_rgb)
+    def _densify(self, gray_a, gray_b, frame_b, K, pose_a, pose_b, result):
+        """Triangulate a dense grid of textured pixels between two keyframes.
+
+        The sparse map above exists to estimate poses; this pass reuses those
+        poses to fill the cloud, tracking every N-th pixel with enough gradient
+        from the previous keyframe to the current one.
+        """
+        cfg = self.cfg
+        if len(result.xyz) >= cfg.max_total_points:
+            return
+        gx = cv2.Sobel(gray_a, cv2.CV_32F, 1, 0, ksize=3)
+        gy = cv2.Sobel(gray_a, cv2.CV_32F, 0, 1, ksize=3)
+        mag = cv2.magnitude(gx, gy)
+        s = cfg.densify_stride
+        ys, xs = np.mgrid[s // 2:gray_a.shape[0]:s, s // 2:gray_a.shape[1]:s]
+        m = mag[ys, xs] > cfg.densify_grad_thresh
+        pa = np.column_stack([xs[m], ys[m]]).astype(np.float32)
+        if len(pa) < 50:
+            return
+        if len(pa) > 45000:
+            pa = pa[np.random.choice(len(pa), 45000, replace=False)]
+
+        lk = dict(winSize=(15, 15), maxLevel=4,
+                  criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.01))
+        pb, st, _ = cv2.calcOpticalFlowPyrLK(gray_a, gray_b, pa.reshape(-1, 1, 2), None, **lk)
+        par, st_b, _ = cv2.calcOpticalFlowPyrLK(gray_b, gray_a, pb, None, **lk)
+        fb = np.linalg.norm(pa - par.reshape(-1, 2), axis=1)
+        pb = pb.reshape(-1, 2)
+        h, w = gray_b.shape
+        ok = (st.ravel() == 1) & (st_b.ravel() == 1) & (fb < 1.0)
+        ok &= (pb[:, 0] >= 0) & (pb[:, 0] < w - 1) & (pb[:, 1] >= 0) & (pb[:, 1] < h - 1)
+        if ok.sum() < 50:
+            return
+        pa, pb = pa[ok].astype(np.float64), pb[ok].astype(np.float64)
+
+        X, good = self._triangulate_filtered(pa, pb, K, pose_a, pose_b,
+                                             cfg.densify_max_reproj)
+        keep = np.flatnonzero(good)
+        if len(keep) > cfg.densify_max_per_kf:
+            keep = np.random.choice(keep, cfg.densify_max_per_kf, replace=False)
+        if len(keep):
+            self._emit(X, keep, pb, frame_b, result)
 
 
 def _to_Twc(pose_wc_3x4: np.ndarray) -> np.ndarray:
