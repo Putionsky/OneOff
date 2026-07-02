@@ -29,35 +29,74 @@ let capacity = 250_000;
 let nPoints = 0;
 let positions = new Float32Array(capacity * 3);
 let colors = new Float32Array(capacity * 3);
+let radii = new Float32Array(capacity);
 
 const geometry = new THREE.BufferGeometry();
-geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+
+// Splats are drawn as screen-facing discs: size follows the per-point radius
+// streamed from the backend (local neighbor spacing), attenuated by distance
+// and clamped so close-ups never degenerate into giant blocks.
+const material = new THREE.ShaderMaterial({
+  transparent: true,
+  depthWrite: true,
+  uniforms: {
+    uPixelFactor: { value: 1 },   // drawingBufferHeight / (2 tan(fov/2))
+    uSizeMult: { value: 1 },
+    uMaxSize: { value: 26 },
+  },
+  vertexShader: /* glsl */`
+    attribute float radius;
+    attribute vec3 aColor;
+    varying vec3 vColor;
+    uniform float uPixelFactor, uSizeMult, uMaxSize;
+    void main() {
+      vColor = aColor;
+      vec4 mv = modelViewMatrix * vec4(position, 1.0);
+      float px = 2.0 * radius * uSizeMult * uPixelFactor / max(-mv.z, 1e-5);
+      gl_PointSize = clamp(px, 1.5, uMaxSize);
+      gl_Position = projectionMatrix * mv;
+    }`,
+  fragmentShader: /* glsl */`
+    varying vec3 vColor;
+    void main() {
+      vec2 c = gl_PointCoord * 2.0 - 1.0;
+      float r2 = dot(c, c);
+      if (r2 > 1.0) discard;
+      gl_FragColor = vec4(vColor, smoothstep(1.0, 0.55, r2));  // gaussian-ish rim
+    }`,
+});
+
+function rebuildAttributes() {
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute("aColor", new THREE.BufferAttribute(colors, 3));
+  geometry.setAttribute("radius", new THREE.BufferAttribute(radii, 1));
+}
+rebuildAttributes();
 geometry.setDrawRange(0, 0);
 
-const material = new THREE.PointsMaterial({
-  size: 0.02, vertexColors: true, sizeAttenuation: true,
-});
 const points = new THREE.Points(geometry, material);
 points.frustumCulled = false;
 scene.add(points);
 
-function appendPoints(xyz, rgb) {
+function appendPoints(xyz, rgb, rad) {
   const n = xyz.length / 3;
   if (nPoints + n > capacity) {
     while (nPoints + n > capacity) capacity *= 2;
     const p = new Float32Array(capacity * 3); p.set(positions.subarray(0, nPoints * 3));
     const c = new Float32Array(capacity * 3); c.set(colors.subarray(0, nPoints * 3));
-    positions = p; colors = c;
-    geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-    geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+    const r = new Float32Array(capacity); r.set(radii.subarray(0, nPoints));
+    positions = p; colors = c; radii = r;
+    rebuildAttributes();
   }
   positions.set(xyz, nPoints * 3);
   for (let i = 0; i < n * 3; i++) colors[nPoints * 3 + i] = rgb[i] / 255;
+  if (rad) radii.set(rad, nPoints);
+  else radii.fill(sceneDiag / 300, nPoints, nPoints + n);  // legacy chunks
   nPoints += n;
   geometry.setDrawRange(0, nPoints);
   geometry.attributes.position.needsUpdate = true;
-  geometry.attributes.color.needsUpdate = true;
+  geometry.attributes.aColor.needsUpdate = true;
+  geometry.attributes.radius.needsUpdate = true;
   document.getElementById("stat-points").textContent = nPoints.toLocaleString();
   refreshScale();
   if (!userMoved) setView("overview");
@@ -120,7 +159,6 @@ function refreshScale() {
   const diag = box.getSize(new THREE.Vector3()).length();
   if (diag > sceneDiag * 1.3 || diag < sceneDiag * 0.5 || !grid) {
     sceneDiag = Math.max(diag, 1e-3);
-    material.size = sceneDiag / 260;
     rebuildTrail(sceneDiag / 70);
     if (grid) scene.remove(grid);
     grid = new THREE.GridHelper(sceneDiag * 1.5, 24, 0xdddddd, 0xe8e8e8);
@@ -193,6 +231,9 @@ function resize() {
   renderer.setSize(w, h);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
+  const buf = renderer.getDrawingBufferSize(new THREE.Vector2());
+  material.uniforms.uPixelFactor.value =
+    buf.y / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2));
 }
 window.addEventListener("resize", resize);
 resize();
@@ -305,6 +346,12 @@ el("btn-reveal").addEventListener("click", async () => {
 el("chk-frame").addEventListener("change", e =>
   el("current-frame").classList.toggle("visible", e.target.checked && !!el("current-frame").src));
 
+el("size-slider").addEventListener("input", e => {
+  material.uniforms.uSizeMult.value = parseFloat(e.target.value);
+});
+
+window.__studio = { camera, controls, setView, material, geometry };  // for tests and debugging
+
 /* ------------------------------------------------------------ websocket */
 
 function connect() {
@@ -339,7 +386,16 @@ function connect() {
     if (type === 1) {
       appendPoints(
         new Float32Array(ev.data, 8, n * 3),
-        new Uint8Array(ev.data, 8 + n * 12, n * 3));
+        new Uint8Array(ev.data, 8 + n * 12, n * 3),
+        null);
+    } else if (type === 3) {
+      // xyz f32*3n, rgb u8*3n, radius f32*n (offset re-aligned to 4 bytes)
+      const rgb = new Uint8Array(ev.data, 8 + n * 12, n * 3);
+      const radOff = 8 + n * 12 + n * 3;
+      const rad = radOff % 4 === 0
+        ? new Float32Array(ev.data, radOff, n)
+        : new Float32Array(ev.data.slice(radOff, radOff + n * 4));
+      appendPoints(new Float32Array(ev.data, 8, n * 3), rgb, rad);
     } else if (type === 2) {
       const f = new Float32Array(ev.data, 8, 16);
       camPoses.push(new THREE.Matrix4().set(...f));  // row-major from numpy

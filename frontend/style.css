@@ -125,6 +125,7 @@ html, body {
 .current-frame.visible { display: block; }
 
 .view-btns { display: flex; flex-direction: column; gap: 5px; }
+.slider { width: 100%; accent-color: #2f7cf6; }
 .stats { font-size: 11px; color: #8e8e93; margin-top: auto; }
 
 /* ---------- helper bar ---------- */
