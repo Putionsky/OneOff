@@ -76,6 +76,13 @@
       <input type="range" id="nPend" min="2" max="24" step="1" value="7">
     </div>
     <div class="ctl">
+      <label>Visualizzazione</label>
+      <select id="mode">
+        <option value="pendulum">Pendoli (semicerchio)</option>
+        <option value="circle">Orbite (cerchio intero)</option>
+      </select>
+    </div>
+    <div class="ctl">
       <label>Durata ciclo <output id="cycleOut"></output></label>
       <input type="range" id="cycle" min="15" max="180" step="5" value="60">
     </div>
@@ -135,6 +142,7 @@ const canvas = $("stage"), hud = $("hud"), panel = $("panel");
 const ui = {
   nPend: $("nPend"), cycle: $("cycle"), base: $("base"), vol: $("vol"),
   scale: $("scale"), root: $("root"), octave: $("octave"), timbre: $("timbre"),
+  mode: $("mode"),
 };
 SCALES.forEach(([name], i) => ui.scale.add(new Option(name, i)));
 NOTE_NAMES.forEach((n, i) => ui.root.add(new Option(n, i)));
@@ -192,12 +200,13 @@ function playNote(freq, when, pan){
 }
 
 /* ---------- modello pendoli ---------- */
-let pendulums = [], t0 = 0, cycleT = 60, running = true;
+let pendulums = [], t0 = 0, cycleT = 60, running = true, mode = "pendulum";
 
 function rebuild(keepPhase){
   const n = +ui.nPend.value;
   const baseOsc = +ui.base.value;
   cycleT = +ui.cycle.value;
+  mode = ui.mode.value;
   const scale = SCALES[+ui.scale.value][1];
   const rootMidi = 12 * (+ui.octave.value + 1) + (+ui.root.value);
   const now = actx ? actx.currentTime : 0;
@@ -211,7 +220,8 @@ function rebuild(keepPhase){
     const midi = rootMidi + 12 * Math.floor(degree / scale.length) + scale[degree % scale.length];
     pendulums.push({
       i, osc,
-      half: cycleT / (2 * osc),                // mezzo periodo = un colpo
+      // un colpo per mezzo periodo (pendolo) o per giro completo (orbita)
+      hitPeriod: cycleT / (mode === "circle" ? osc : 2 * osc),
       freq: midiToFreq(midi),
       noteName: NOTE_NAMES[midi % 12] + (Math.floor(midi / 12) - 1),
       nextK: 1,                                // prossimo colpo da schedulare (k=0 è la partenza)
@@ -221,23 +231,30 @@ function rebuild(keepPhase){
   }
   // riallinea lo scheduler alla fase corrente
   const el = Math.max(0, now - t0);
-  for (const p of pendulums) p.nextK = Math.floor(el / p.half) + 1;
+  for (const p of pendulums) p.nextK = Math.floor(el / p.hitPeriod) + 1;
 }
 
 /* ---------- scheduler audio (lookahead) ---------- */
 function schedule(){
   if (!actx || !running) return;
   const now = actx.currentTime, ahead = 0.18;
+  const n1 = Math.max(1, pendulums.length - 1);
   for (const p of pendulums){
-    let t = t0 + p.nextK * p.half;
+    let t = t0 + p.nextK * p.hitPeriod;
     while (t < now + ahead){
       if (t > now - 0.05){
-        const side = (p.nextK % 2 === 1) ? 1 : -1;   // dispari = estremo destro
-        const spread = 0.15 + 0.55 * (pendulums.length === 1 ? 1 : p.i / (pendulums.length - 1));
-        playNote(p.freq, Math.max(t, now + 0.001), side * spread);
+        let pan;
+        if (mode === "circle"){
+          // tutte le orbite colpiscono in alto: apri lo stereo per indice
+          pan = (p.i / n1 - 0.5) * 0.9;
+        } else {
+          const side = (p.nextK % 2 === 1) ? 1 : -1; // dispari = estremo destro
+          pan = side * (0.15 + 0.55 * (p.i / n1));
+        }
+        playNote(p.freq, Math.max(t, now + 0.001), pan);
       }
       p.nextK++;
-      t = t0 + p.nextK * p.half;
+      t = t0 + p.nextK * p.hitPeriod;
     }
   }
 }
@@ -272,25 +289,49 @@ function draw(){
   const cx = W / 2;
   const panelH = panel.classList.contains("open") ? panel.offsetHeight : 54;
   const avail = H - panelH;
-  // centra il blocco degli archi nello spazio libero sopra il pannello
-  const cy = Math.max(120, Math.min(avail - 28, (avail + Math.min(W / 2 - 14, avail - 72)) / 2 + 22));
-  const maxR = Math.min(W / 2 - 14, cy - 44);
+  const circle = mode === "circle";
+  let cy, maxR;
+  if (circle){
+    // cerchi interi centrati nello spazio libero (sotto l'HUD)
+    cy = Math.max(120, (avail + 44) / 2);
+    maxR = Math.max(40, Math.min(W / 2 - 14, cy - 56, avail - cy - 16));
+  } else {
+    // centra il blocco degli archi nello spazio libero sopra il pannello
+    cy = Math.max(120, Math.min(avail - 28, (avail + Math.min(W / 2 - 14, avail - 72)) / 2 + 22));
+    maxR = Math.min(W / 2 - 14, cy - 44);
+  }
   const minR = Math.max(26, maxR * 0.16);
 
-  // linea di base + centro
-  g.strokeStyle = "rgba(139,148,168,0.35)";
-  g.lineWidth = 1;
-  g.beginPath();
-  g.moveTo(cx - maxR - 10, cy); g.lineTo(cx + maxR + 10, cy);
-  g.stroke();
+  if (circle){
+    // punto di innesco in alto
+    g.strokeStyle = "rgba(139,148,168,0.35)";
+    g.lineWidth = 1;
+    g.beginPath();
+    g.moveTo(cx, cy - minR + 14); g.lineTo(cx, cy - maxR - 12);
+    g.stroke();
+    g.fillStyle = "rgba(232,236,244,0.9)";
+    g.beginPath(); g.arc(cx, cy - maxR - 12, 3, 0, 7); g.fill();
+  } else {
+    // linea di base
+    g.strokeStyle = "rgba(139,148,168,0.35)";
+    g.lineWidth = 1;
+    g.beginPath();
+    g.moveTo(cx - maxR - 10, cy); g.lineTo(cx + maxR + 10, cy);
+    g.stroke();
+  }
   g.fillStyle = "rgba(232,236,244,0.8)";
   g.beginPath(); g.arc(cx, cy, 3, 0, 7); g.fill();
 
   for (const p of pendulums){
     const r = n === 1 ? maxR : minR + (maxR - minR) * (p.i / (n - 1));
-    const phase = el / p.half;                  // in mezzi periodi
-    const prog = 0.5 - 0.5 * Math.cos(Math.PI * phase);  // 0..1 avanti e indietro
-    const a = Math.PI + Math.PI * prog;         // π (sx) → 2π (dx), semicerchio alto
+    const phase = el / p.hitPeriod;             // colpo a ogni unità
+    let a;
+    if (circle){
+      a = -Math.PI / 2 + 2 * Math.PI * (phase % 1);       // giro completo, innesco in alto
+    } else {
+      const prog = 0.5 - 0.5 * Math.cos(Math.PI * phase); // 0..1 avanti e indietro
+      a = Math.PI + Math.PI * prog;                        // π (sx) → 2π (dx)
+    }
     const x = cx + r * Math.cos(a), y = cy + r * Math.sin(a);
 
     // colpo visivo
@@ -298,10 +339,19 @@ function draw(){
     if (k > p.lastVisK){ p.lastVisK = k; p.flash = 1; }
     p.flash *= 0.90;
 
-    // arco guida
+    // guida
     g.strokeStyle = `hsla(${p.hue}, 70%, 65%, ${0.10 + 0.35 * p.flash})`;
     g.lineWidth = 1;
-    g.beginPath(); g.arc(cx, cy, r, Math.PI, 2 * Math.PI); g.stroke();
+    g.beginPath();
+    if (circle) g.arc(cx, cy, r, 0, 2 * Math.PI);
+    else g.arc(cx, cy, r, Math.PI, 2 * Math.PI);
+    g.stroke();
+
+    // raggio che lega la pallina al centro
+    if (circle){
+      g.strokeStyle = `hsla(${p.hue}, 70%, 65%, ${0.22 + 0.5 * p.flash})`;
+      g.beginPath(); g.moveTo(cx, cy); g.lineTo(x, y); g.stroke();
+    }
 
     // pallina
     const rad = 5 + Math.min(9, maxR / 40) + 4 * p.flash;
@@ -314,7 +364,7 @@ function draw(){
 
   const rem = cycleT - (el % cycleT);
   hud.innerHTML = actx
-    ? `<b>${n}</b> pendoli · scala <b>${SCALES[+ui.scale.value][0]}</b> · riallineamento tra <b>${rem.toFixed(0)}s</b>`
+    ? `<b>${n}</b> ${circle ? "orbite" : "pendoli"} · scala <b>${SCALES[+ui.scale.value][0]}</b> · riallineamento tra <b>${rem.toFixed(0)}s</b>`
     : "";
 }
 requestAnimationFrame(draw);
@@ -348,8 +398,8 @@ $("panelBar").addEventListener("click", e => {
 // parametri strutturali → ricostruisci (riparte il ciclo)
 for (const id of ["nPend", "cycle", "base"])
   ui[id].addEventListener("change", () => { if (actx) rebuild(false); updateOutputs(); });
-// parametri musicali → aggiorna senza perdere la fase
-for (const id of ["scale", "root", "octave"])
+// parametri musicali/visivi → aggiorna senza perdere la fase
+for (const id of ["scale", "root", "octave", "mode"])
   ui[id].addEventListener("change", () => { if (actx) rebuild(true); });
 ui.vol.addEventListener("input", () => {
   if (master) master.gain.value = +ui.vol.value / 100;
