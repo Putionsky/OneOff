@@ -249,10 +249,15 @@ let W = 0, H = 0, DPR = 1;
 function resize(){
   DPR = Math.min(window.devicePixelRatio || 1, 2);
   W = window.innerWidth; H = window.innerHeight;
-  canvas.width = W * DPR; canvas.height = H * DPR;
+  // dimensione CSS esplicita: senza, il canvas fixed viene mostrato
+  // alla sua dimensione intrinseca (W*DPR) e su mobile esce dallo schermo
+  canvas.style.width = W + "px"; canvas.style.height = H + "px";
+  canvas.width = Math.round(W * DPR); canvas.height = Math.round(H * DPR);
   g.setTransform(DPR, 0, 0, DPR, 0, 0);
 }
 window.addEventListener("resize", resize);
+if (window.visualViewport) window.visualViewport.addEventListener("resize", resize);
+window.addEventListener("orientationchange", () => setTimeout(resize, 250));
 resize();
 
 function draw(){
@@ -329,6 +334,11 @@ $("playBtn").addEventListener("click", () => {
   else { actx.suspend(); $("playBtn").textContent = "▶ Riprendi"; }
 });
 $("resetBtn").addEventListener("click", () => { if (actx) rebuild(false); });
+
+// se il sistema sospende l'audio (chiamata, cambio app), riprova al tocco
+document.addEventListener("pointerdown", () => {
+  if (actx && running && actx.state !== "running") actx.resume();
+});
 
 $("panelBar").addEventListener("click", e => {
   if (e.target.tagName === "BUTTON") return;
