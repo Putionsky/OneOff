@@ -80,8 +80,13 @@
       <select id="mode">
         <option value="pendulum">Pendoli (semicerchio)</option>
         <option value="circle">Orbite (cerchio intero)</option>
-        <option value="polygon">Poligoni regolari</option>
+        <option value="polygon">Poligoni crescenti (3,4,5…)</option>
+        <option value="polyconc">Poligoni concentrici (n lati)</option>
       </select>
+    </div>
+    <div class="ctl" id="sidesCtl" style="display:none">
+      <label>Lati dei poligoni <output id="sidesOut"></output></label>
+      <input type="range" id="sides" min="3" max="12" step="1" value="3">
     </div>
     <div class="ctl">
       <label>Durata ciclo <output id="cycleOut"></output></label>
@@ -143,7 +148,7 @@ const canvas = $("stage"), hud = $("hud"), panel = $("panel");
 const ui = {
   nPend: $("nPend"), cycle: $("cycle"), base: $("base"), vol: $("vol"),
   scale: $("scale"), root: $("root"), octave: $("octave"), timbre: $("timbre"),
-  mode: $("mode"),
+  mode: $("mode"), sides: $("sides"),
 };
 SCALES.forEach(([name], i) => ui.scale.add(new Option(name, i)));
 NOTE_NAMES.forEach((n, i) => ui.root.add(new Option(n, i)));
@@ -224,6 +229,11 @@ function rebuild(keepPhase){
       sides = 3 + i;                           // triangolo interno → poligoni via via più fitti
       degree = i;                              // più vertici = più veloce = nota più acuta
       hitPeriod = realignT / sides;            // una nota per vertice
+    } else if (mode === "polyconc"){
+      sides = +ui.sides.value;                 // stessa forma per tutti gli anelli
+      const osc = baseOsc + (n - 1 - i);       // giri per ciclo: interno più veloce
+      degree = n - 1 - i;
+      hitPeriod = cycleT / (osc * sides);      // una nota per vertice
     } else {
       // esterno = lento = nota grave; interno = veloce = nota acuta
       const osc = baseOsc + (n - 1 - i);       // oscillazioni complete per ciclo
@@ -256,7 +266,7 @@ function schedule(){
     while (t < now + ahead){
       if (t > now - 0.05){
         let pan;
-        if (mode === "polygon"){
+        if (p.sides){
           // il pan segue la posizione del vertice colpito
           pan = 0.75 * Math.cos(-Math.PI / 2 + 2 * Math.PI * (p.nextK % p.sides) / p.sides);
         } else if (mode === "circle"){
@@ -304,7 +314,7 @@ function draw(){
   const cx = W / 2;
   const panelH = panel.classList.contains("open") ? panel.offsetHeight : 54;
   const avail = H - panelH;
-  const circle = mode === "circle", poly = mode === "polygon";
+  const circle = mode === "circle", poly = mode === "polygon" || mode === "polyconc";
   const radial = circle || poly;
   let cy, maxR;
   if (radial){
@@ -441,8 +451,15 @@ $("panelBar").addEventListener("click", e => {
 for (const id of ["nPend", "cycle", "base"])
   ui[id].addEventListener("change", () => { if (actx) rebuild(false); updateOutputs(); });
 // parametri musicali/visivi → aggiorna senza perdere la fase
-for (const id of ["scale", "root", "octave", "mode"])
+for (const id of ["scale", "root", "octave", "mode", "sides"])
   ui[id].addEventListener("change", () => { if (actx) rebuild(true); });
+// il numero di lati ha senso solo per i poligoni concentrici
+function syncSidesCtl(){
+  $("sidesCtl").style.display = ui.mode.value === "polyconc" ? "" : "none";
+}
+ui.mode.addEventListener("change", syncSidesCtl);
+ui.sides.addEventListener("input", updateOutputs);
+syncSidesCtl();
 ui.vol.addEventListener("input", () => {
   if (master) master.gain.value = +ui.vol.value / 100;
   updateOutputs();
@@ -454,6 +471,7 @@ function updateOutputs(){
   $("cycleOut").textContent = ui.cycle.value + " s";
   $("baseOut").textContent = "×" + ui.base.value;
   $("volOut").textContent = ui.vol.value + "%";
+  $("sidesOut").textContent = ui.sides.value;
 }
 updateOutputs();
 </script>
