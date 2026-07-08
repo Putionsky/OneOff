@@ -25,7 +25,10 @@ per sbloccare l'audio. Il pannello **Impostazioni** in basso permette di:
   lento, il corto controruota veloce) che suona quando i bracci si
   allineano sulla punta di un petalo; la curva epicicloidale, tracciata
   dalla rosa, ha tanti petali quante sono le note per ciclo e si chiude
-  esattamente al riallineamento
+  esattamente al riallineamento. Parametri dedicati: giri del braccio
+  lungo (Auto = varia per voce), lunghezza della penna (10–80% del
+  raggio) e stile dei petali — punte (bracci controrotanti) o ricci
+  (bracci corotanti)
 - **Rosa del ciclo** — le corde che collegano gli elementi adiacenti si
   accumulano su una tela persistente: nell'arco di un ciclo disegnano la
   "rosa" geometrica del poliritmo, che si completa al riallineamento e

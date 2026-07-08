@@ -89,6 +89,21 @@
       <label>Lati dei poligoni <output id="sidesOut"></output></label>
       <input type="range" id="sides" min="3" max="12" step="1" value="3">
     </div>
+    <div class="ctl spiroOnly" style="display:none">
+      <label>Giri braccio lungo <output id="spinSOut"></output></label>
+      <input type="range" id="spinS" min="0" max="12" step="1" value="0">
+    </div>
+    <div class="ctl spiroOnly" style="display:none">
+      <label>Lunghezza penna <output id="armOut"></output></label>
+      <input type="range" id="armRatio" min="10" max="80" step="2" value="28">
+    </div>
+    <div class="ctl spiroOnly" style="display:none">
+      <label>Stile petali</label>
+      <select id="spiroStyle">
+        <option value="counter">Punte (controrotante)</option>
+        <option value="co">Ricci (corotante)</option>
+      </select>
+    </div>
     <div class="ctl">
       <label>Rosa del ciclo</label>
       <select id="rose">
@@ -157,6 +172,7 @@ const ui = {
   nPend: $("nPend"), cycle: $("cycle"), base: $("base"), vol: $("vol"),
   scale: $("scale"), root: $("root"), octave: $("octave"), timbre: $("timbre"),
   mode: $("mode"), sides: $("sides"), rose: $("rose"),
+  spinS: $("spinS"), armRatio: $("armRatio"), spiroStyle: $("spiroStyle"),
 };
 SCALES.forEach(([name], i) => ui.scale.add(new Option(name, i)));
 NOTE_NAMES.forEach((n, i) => ui.root.add(new Option(n, i)));
@@ -243,13 +259,22 @@ function rebuild(keepPhase){
       degree = n - 1 - i;
       hitPeriod = cycleT / (osc * sides);      // una nota per vertice
     } else if (mode === "spiro"){
-      // doppio braccio: il lungo gira piano, il corto controruota veloce;
-      // i bracci si allineano (punta del petalo) hits volte per ciclo
+      // doppio braccio: i bracci si allineano (punta del petalo) hits volte per ciclo
       const hits = baseOsc + (n - 1 - i);
       degree = n - 1 - i;
       hitPeriod = cycleT / hits;
-      spinSlow = 1 + (i % Math.max(1, Math.min(4, hits - 1))); // giri del braccio lungo
-      spinFast = hits - spinSlow;                              // controgiri del corto
+      const chosen = +ui.spinS.value;          // 0 = auto, varia per voce
+      if (ui.spiroStyle.value === "co"){
+        // corotante: ricci; il corto deve superare il lungo di hits giri
+        spinSlow = chosen === 0 ? 1 + (i % 4) : chosen;
+        spinFast = spinSlow + hits;
+      } else {
+        // controrotante: punte; i giri si sommano
+        spinSlow = chosen === 0
+          ? 1 + (i % Math.max(1, Math.min(4, hits - 1)))
+          : Math.max(1, Math.min(chosen, hits - 1));
+        spinFast = hits - spinSlow;
+      }
     } else {
       // esterno = lento = nota grave; interno = veloce = nota acuta
       const osc = baseOsc + (n - 1 - i);       // oscillazioni complete per ciclo
@@ -260,6 +285,7 @@ function rebuild(keepPhase){
     const midi = rootMidi + 12 * Math.floor(degree / scale.length) + scale[degree % scale.length];
     pendulums.push({
       i, sides, hitPeriod, spinSlow, spinFast,
+      dir: mode === "spiro" && ui.spiroStyle.value === "co" ? 1 : -1,
       px: NaN, py: NaN,
       freq: midiToFreq(midi),
       noteName: NOTE_NAMES[midi % 12] + (Math.floor(midi / 12) - 1),
@@ -403,11 +429,12 @@ function draw(){
     const vAng = k => -Math.PI / 2 + 2 * Math.PI * k / p.sides; // angolo del vertice k
     let x, y, elbowX, elbowY;
     if (spiro){
-      // epiciclo: braccio lungo lento + braccio corto controrotante
+      // epiciclo: braccio lungo lento + braccio corto (contro)rotante veloce
       const u = el / cycleT;
       const a1 = -Math.PI / 2 + 2 * Math.PI * p.spinSlow * u;
-      const a2 = -Math.PI / 2 - 2 * Math.PI * p.spinFast * u;
-      const r1 = r * 0.72, r2 = r * 0.28;
+      const a2 = -Math.PI / 2 + p.dir * 2 * Math.PI * p.spinFast * u;
+      const pen = +ui.armRatio.value / 100;
+      const r1 = r * (1 - pen), r2 = r * pen;
       elbowX = cx + r1 * Math.cos(a1); elbowY = cy + r1 * Math.sin(a1);
       x = elbowX + r2 * Math.cos(a2); y = elbowY + r2 * Math.sin(a2);
     } else if (poly){
@@ -542,14 +569,18 @@ $("panelBar").addEventListener("click", e => {
 for (const id of ["nPend", "cycle", "base"])
   ui[id].addEventListener("change", () => { if (actx) rebuild(false); updateOutputs(); });
 // parametri musicali/visivi → aggiorna senza perdere la fase
-for (const id of ["scale", "root", "octave", "mode", "sides"])
+for (const id of ["scale", "root", "octave", "mode", "sides", "spinS", "armRatio", "spiroStyle"])
   ui[id].addEventListener("change", () => { if (actx) rebuild(true); });
-// il numero di lati ha senso solo per i poligoni concentrici
+// controlli specifici della modalità selezionata
 function syncSidesCtl(){
   $("sidesCtl").style.display = ui.mode.value === "polyconc" ? "" : "none";
+  for (const el of document.querySelectorAll(".spiroOnly"))
+    el.style.display = ui.mode.value === "spiro" ? "" : "none";
 }
 ui.mode.addEventListener("change", syncSidesCtl);
 ui.sides.addEventListener("input", updateOutputs);
+ui.spinS.addEventListener("input", updateOutputs);
+ui.armRatio.addEventListener("input", updateOutputs);
 ui.rose.addEventListener("change", () => { lastCycleIdx = -1; clearTrail(); });
 syncSidesCtl();
 ui.vol.addEventListener("input", () => {
@@ -564,6 +595,8 @@ function updateOutputs(){
   $("baseOut").textContent = "×" + ui.base.value;
   $("volOut").textContent = ui.vol.value + "%";
   $("sidesOut").textContent = ui.sides.value;
+  $("spinSOut").textContent = +ui.spinS.value === 0 ? "Auto" : "×" + ui.spinS.value;
+  $("armOut").textContent = ui.armRatio.value + "%";
 }
 updateOutputs();
 </script>
