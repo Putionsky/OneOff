@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Poliritmi — pendoli musicali</title>
+<style>
+  :root{
+    --bg:#0b0e14; --panel:#141926; --panel2:#1c2334; --text:#e8ecf4;
+    --dim:#8b94a8; --accent:#6ea8ff; --line:#2a3348;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0; height:100%; overflow:hidden; background:var(--bg); color:var(--text);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  #stage{position:fixed; inset:0; display:block; touch-action:manipulation;}
+  #hud{position:fixed; top:calc(10px + env(safe-area-inset-top)); left:0; right:0;
+    text-align:center; pointer-events:none; font-size:13px; color:var(--dim); letter-spacing:.04em;}
+  #hud b{color:var(--text); font-weight:600;}
+
+  /* pannello controlli */
+  #panel{position:fixed; left:0; right:0; bottom:0; background:color-mix(in srgb, var(--panel) 92%, transparent);
+    backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px);
+    border-top:1px solid var(--line); border-radius:18px 18px 0 0;
+    padding:8px 14px calc(12px + env(safe-area-inset-bottom));
+    transform:translateY(calc(100% - 54px)); transition:transform .28s ease; z-index:10;}
+  #panel.open{transform:translateY(0);}
+  #panelBar{display:flex; align-items:center; gap:10px; height:38px; cursor:pointer; user-select:none;}
+  #grip{width:36px; height:4px; border-radius:2px; background:var(--dim); margin:0 auto; position:absolute; left:50%; top:6px; transform:translateX(-50%);}
+  #panelBar .title{font-size:14px; font-weight:600;}
+  #panelBar .spacer{flex:1;}
+  button{font:inherit; color:var(--text); background:var(--panel2); border:1px solid var(--line);
+    border-radius:10px; padding:8px 14px; cursor:pointer; min-height:40px;}
+  button:active{background:var(--accent); color:#0b0e14;}
+  button.primary{background:var(--accent); color:#0b0e14; border-color:transparent; font-weight:700;}
+  #controls{display:grid; grid-template-columns:1fr 1fr; gap:10px 16px; padding-top:10px; max-height:52vh; overflow-y:auto;}
+  .ctl{display:flex; flex-direction:column; gap:4px;}
+  .ctl.wide{grid-column:1 / -1;}
+  .ctl label{font-size:12px; color:var(--dim); display:flex; justify-content:space-between;}
+  .ctl label output{color:var(--text); font-variant-numeric:tabular-nums;}
+  input[type=range]{width:100%; accent-color:var(--accent); height:34px; margin:0;}
+  select{font:inherit; color:var(--text); background:var(--panel2); border:1px solid var(--line);
+    border-radius:10px; padding:8px 10px; min-height:40px; width:100%;}
+  .row{display:flex; gap:8px;}
+  .row>*{flex:1;}
+
+  /* overlay avvio */
+  #overlay{position:fixed; inset:0; background:rgba(11,14,20,.86); backdrop-filter:blur(6px);
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; z-index:20; text-align:center; padding:24px;}
+  #overlay h1{font-size:22px; margin:0; font-weight:700;}
+  #overlay p{margin:0; color:var(--dim); font-size:14px; max-width:32em;}
+  #overlay button{font-size:18px; padding:14px 34px; border-radius:14px;}
+</style>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<div id="hud"></div>
+
+<div id="overlay">
+  <h1>Poliritmi — pendoli musicali</h1>
+  <p>Ogni arco è un pendolo: oscilla a una velocità diversa e suona una nota della scala
+     quando raggiunge un estremo. Tutti si riallineano alla fine del ciclo.</p>
+  <button class="primary" id="startBtn">▶ &nbsp;Tocca per iniziare</button>
+</div>
+
+<div id="panel">
+  <div id="grip"></div>
+  <div id="panelBar">
+    <span class="title">⚙️ Impostazioni</span>
+    <span class="spacer"></span>
+    <button id="playBtn" class="primary">⏸ Pausa</button>
+    <button id="resetBtn">↺</button>
+  </div>
+  <div id="controls">
+    <div class="ctl wide">
+      <label>Pendoli (complessità) <output id="nPendOut"></output></label>
+      <input type="range" id="nPend" min="2" max="24" step="1" value="7">
+    </div>
+    <div class="ctl">
+      <label>Durata ciclo <output id="cycleOut"></output></label>
+      <input type="range" id="cycle" min="15" max="180" step="5" value="60">
+    </div>
+    <div class="ctl">
+      <label>Oscillazioni base <output id="baseOut"></output></label>
+      <input type="range" id="base" min="2" max="40" step="1" value="10">
+    </div>
+    <div class="ctl">
+      <label>Scala</label>
+      <select id="scale"></select>
+    </div>
+    <div class="ctl">
+      <label>Fondamentale</label>
+      <div class="row">
+        <select id="root"></select>
+        <select id="octave"></select>
+      </div>
+    </div>
+    <div class="ctl">
+      <label>Timbro</label>
+      <select id="timbre">
+        <option value="soft">Morbido</option>
+        <option value="pluck">Pluck</option>
+        <option value="bell">Campana</option>
+      </select>
+    </div>
+    <div class="ctl">
+      <label>Volume <output id="volOut"></output></label>
+      <input type="range" id="vol" min="0" max="100" step="1" value="70">
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+/* ---------- scale e note ---------- */
+const SCALES = [
+  ["Pentatonica maggiore", [0,2,4,7,9]],
+  ["Pentatonica minore",   [0,3,5,7,10]],
+  ["Maggiore",             [0,2,4,5,7,9,11]],
+  ["Minore naturale",      [0,2,3,5,7,8,10]],
+  ["Minore armonica",      [0,2,3,5,7,8,11]],
+  ["Dorica",               [0,2,3,5,7,9,10]],
+  ["Lidia",                [0,2,4,6,7,9,11]],
+  ["Misolidia",            [0,2,4,5,7,9,10]],
+  ["Blues",                [0,3,5,6,7,10]],
+  ["Esatonale",            [0,2,4,6,8,10]],
+  ["Cromatica",            [0,1,2,3,4,5,6,7,8,9,10,11]],
+];
+const NOTE_NAMES = ["Do","Do#","Re","Re#","Mi","Fa","Fa#","Sol","Sol#","La","La#","Si"];
+const midiToFreq = m => 440 * Math.pow(2, (m - 69) / 12);
+
+/* ---------- elementi UI ---------- */
+const $ = id => document.getElementById(id);
+const canvas = $("stage"), hud = $("hud"), panel = $("panel");
+const ui = {
+  nPend: $("nPend"), cycle: $("cycle"), base: $("base"), vol: $("vol"),
+  scale: $("scale"), root: $("root"), octave: $("octave"), timbre: $("timbre"),
+};
+SCALES.forEach(([name], i) => ui.scale.add(new Option(name, i)));
+NOTE_NAMES.forEach((n, i) => ui.root.add(new Option(n, i)));
+[2,3,4].forEach(o => ui.octave.add(new Option("Ottava " + o, o)));
+ui.octave.value = "3";
+
+/* ---------- audio ---------- */
+let actx = null, master = null;
+function initAudio(){
+  actx = new (window.AudioContext || window.webkitAudioContext)();
+  master = actx.createGain();
+  master.gain.value = +ui.vol.value / 100;
+  const comp = actx.createDynamicsCompressor();
+  comp.threshold.value = -18; comp.knee.value = 12; comp.ratio.value = 6;
+  master.connect(comp).connect(actx.destination);
+}
+
+function playNote(freq, when, pan){
+  const timbre = ui.timbre.value;
+  const out = actx.createGain();
+  let dest = out;
+  if (actx.createStereoPanner){
+    const p = actx.createStereoPanner();
+    p.pan.value = pan;
+    out.connect(p).connect(master);
+  } else {
+    out.connect(master);
+  }
+  const env = (peak, decay) => {
+    out.gain.setValueAtTime(0.0001, when);
+    out.gain.linearRampToValueAtTime(peak, when + 0.008);
+    out.gain.exponentialRampToValueAtTime(0.0001, when + decay);
+  };
+  const mk = (type, f, gainMul, decay) => {
+    const o = actx.createOscillator();
+    o.type = type; o.frequency.value = f;
+    const g = actx.createGain(); g.gain.value = gainMul;
+    o.connect(g).connect(dest);
+    o.start(when); o.stop(when + decay + 0.1);
+  };
+  if (timbre === "pluck"){
+    env(0.5, 0.35);
+    mk("triangle", freq, 1, 0.35);
+    mk("triangle", freq * 2, 0.25, 0.2);
+  } else if (timbre === "bell"){
+    env(0.4, 1.6);
+    mk("sine", freq, 1, 1.6);
+    mk("sine", freq * 2.76, 0.3, 0.9);
+    mk("sine", freq * 4.07, 0.12, 0.5);
+  } else { // morbido
+    env(0.45, 0.9);
+    mk("sine", freq, 1, 0.9);
+    mk("sine", freq * 2, 0.15, 0.5);
+  }
+}
+
+/* ---------- modello pendoli ---------- */
+let pendulums = [], t0 = 0, cycleT = 60, running = true;
+
+function rebuild(keepPhase){
+  const n = +ui.nPend.value;
+  const baseOsc = +ui.base.value;
+  cycleT = +ui.cycle.value;
+  const scale = SCALES[+ui.scale.value][1];
+  const rootMidi = 12 * (+ui.octave.value + 1) + (+ui.root.value);
+  const now = actx ? actx.currentTime : 0;
+  if (!keepPhase) t0 = now;
+
+  pendulums = [];
+  for (let i = 0; i < n; i++){
+    // esterno = lento = nota grave; interno = veloce = nota acuta
+    const osc = baseOsc + (n - 1 - i);        // oscillazioni complete per ciclo
+    const degree = n - 1 - i;                  // grado della scala
+    const midi = rootMidi + 12 * Math.floor(degree / scale.length) + scale[degree % scale.length];
+    pendulums.push({
+      i, osc,
+      half: cycleT / (2 * osc),                // mezzo periodo = un colpo
+      freq: midiToFreq(midi),
+      noteName: NOTE_NAMES[midi % 12] + (Math.floor(midi / 12) - 1),
+      nextK: 1,                                // prossimo colpo da schedulare (k=0 è la partenza)
+      lastVisK: 0, flash: 0,
+      hue: 275 - 235 * (n === 1 ? 0 : i / (n - 1)),
+    });
+  }
+  // riallinea lo scheduler alla fase corrente
+  const el = Math.max(0, now - t0);
+  for (const p of pendulums) p.nextK = Math.floor(el / p.half) + 1;
+}
+
+/* ---------- scheduler audio (lookahead) ---------- */
+function schedule(){
+  if (!actx || !running) return;
+  const now = actx.currentTime, ahead = 0.18;
+  for (const p of pendulums){
+    let t = t0 + p.nextK * p.half;
+    while (t < now + ahead){
+      if (t > now - 0.05){
+        const side = (p.nextK % 2 === 1) ? 1 : -1;   // dispari = estremo destro
+        const spread = 0.15 + 0.55 * (pendulums.length === 1 ? 1 : p.i / (pendulums.length - 1));
+        playNote(p.freq, Math.max(t, now + 0.001), side * spread);
+      }
+      p.nextK++;
+      t = t0 + p.nextK * p.half;
+    }
+  }
+}
+setInterval(schedule, 30);
+
+/* ---------- disegno ---------- */
+const g = canvas.getContext("2d");
+let W = 0, H = 0, DPR = 1;
+function resize(){
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width = W * DPR; canvas.height = H * DPR;
+  g.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+window.addEventListener("resize", resize);
+resize();
+
+function draw(){
+  requestAnimationFrame(draw);
+  const now = actx ? actx.currentTime : 0;
+  const el = Math.max(0, now - t0);
+
+  g.fillStyle = "rgba(11,14,20,0.5)";          // scia leggera
+  g.fillRect(0, 0, W, H);
+
+  const n = pendulums.length;
+  const cx = W / 2;
+  const panelH = panel.classList.contains("open") ? panel.offsetHeight : 54;
+  const avail = H - panelH;
+  // centra il blocco degli archi nello spazio libero sopra il pannello
+  const cy = Math.max(120, Math.min(avail - 28, (avail + Math.min(W / 2 - 14, avail - 72)) / 2 + 22));
+  const maxR = Math.min(W / 2 - 14, cy - 44);
+  const minR = Math.max(26, maxR * 0.16);
+
+  // linea di base + centro
+  g.strokeStyle = "rgba(139,148,168,0.35)";
+  g.lineWidth = 1;
+  g.beginPath();
+  g.moveTo(cx - maxR - 10, cy); g.lineTo(cx + maxR + 10, cy);
+  g.stroke();
+  g.fillStyle = "rgba(232,236,244,0.8)";
+  g.beginPath(); g.arc(cx, cy, 3, 0, 7); g.fill();
+
+  for (const p of pendulums){
+    const r = n === 1 ? maxR : minR + (maxR - minR) * (p.i / (n - 1));
+    const phase = el / p.half;                  // in mezzi periodi
+    const prog = 0.5 - 0.5 * Math.cos(Math.PI * phase);  // 0..1 avanti e indietro
+    const a = Math.PI + Math.PI * prog;         // π (sx) → 2π (dx), semicerchio alto
+    const x = cx + r * Math.cos(a), y = cy + r * Math.sin(a);
+
+    // colpo visivo
+    const k = Math.floor(phase);
+    if (k > p.lastVisK){ p.lastVisK = k; p.flash = 1; }
+    p.flash *= 0.90;
+
+    // arco guida
+    g.strokeStyle = `hsla(${p.hue}, 70%, 65%, ${0.10 + 0.35 * p.flash})`;
+    g.lineWidth = 1;
+    g.beginPath(); g.arc(cx, cy, r, Math.PI, 2 * Math.PI); g.stroke();
+
+    // pallina
+    const rad = 5 + Math.min(9, maxR / 40) + 4 * p.flash;
+    g.shadowColor = `hsla(${p.hue}, 85%, 65%, 0.9)`;
+    g.shadowBlur = 12 + 26 * p.flash;
+    g.fillStyle = `hsl(${p.hue}, 85%, ${62 + 25 * p.flash}%)`;
+    g.beginPath(); g.arc(x, y, rad, 0, 7); g.fill();
+    g.shadowBlur = 0;
+  }
+
+  const rem = cycleT - (el % cycleT);
+  hud.innerHTML = actx
+    ? `<b>${n}</b> pendoli · scala <b>${SCALES[+ui.scale.value][0]}</b> · riallineamento tra <b>${rem.toFixed(0)}s</b>`
+    : "";
+}
+requestAnimationFrame(draw);
+
+/* ---------- interazione ---------- */
+$("startBtn").addEventListener("click", () => {
+  if (!actx) initAudio();
+  actx.resume();
+  rebuild(false);
+  $("overlay").style.display = "none";
+});
+
+$("playBtn").addEventListener("click", () => {
+  if (!actx) return;
+  running = !running;
+  if (running){ actx.resume(); $("playBtn").textContent = "⏸ Pausa"; }
+  else { actx.suspend(); $("playBtn").textContent = "▶ Riprendi"; }
+});
+$("resetBtn").addEventListener("click", () => { if (actx) rebuild(false); });
+
+$("panelBar").addEventListener("click", e => {
+  if (e.target.tagName === "BUTTON") return;
+  panel.classList.toggle("open");
+});
+
+// parametri strutturali → ricostruisci (riparte il ciclo)
+for (const id of ["nPend", "cycle", "base"])
+  ui[id].addEventListener("change", () => { if (actx) rebuild(false); updateOutputs(); });
+// parametri musicali → aggiorna senza perdere la fase
+for (const id of ["scale", "root", "octave"])
+  ui[id].addEventListener("change", () => { if (actx) rebuild(true); });
+ui.vol.addEventListener("input", () => {
+  if (master) master.gain.value = +ui.vol.value / 100;
+  updateOutputs();
+});
+for (const id of ["nPend", "cycle", "base"]) ui[id].addEventListener("input", updateOutputs);
+
+function updateOutputs(){
+  $("nPendOut").textContent = ui.nPend.value;
+  $("cycleOut").textContent = ui.cycle.value + " s";
+  $("baseOut").textContent = "×" + ui.base.value;
+  $("volOut").textContent = ui.vol.value + "%";
+}
+updateOutputs();
+</script>
+</body>
+</html>
