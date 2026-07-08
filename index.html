@@ -80,6 +80,7 @@
       <select id="mode">
         <option value="pendulum">Pendoli (semicerchio)</option>
         <option value="circle">Orbite (cerchio intero)</option>
+        <option value="polygon">Poligoni regolari</option>
       </select>
     </div>
     <div class="ctl">
@@ -200,7 +201,7 @@ function playNote(freq, when, pan){
 }
 
 /* ---------- modello pendoli ---------- */
-let pendulums = [], t0 = 0, cycleT = 60, running = true, mode = "pendulum";
+let pendulums = [], t0 = 0, cycleT = 60, realignT = 60, running = true, mode = "pendulum";
 
 function rebuild(keepPhase){
   const n = +ui.nPend.value;
@@ -212,16 +213,27 @@ function rebuild(keepPhase){
   const now = actx ? actx.currentTime : 0;
   if (!keepPhase) t0 = now;
 
+  // poligoni: tutti girano insieme, il poliritmo nasce dal numero di vertici;
+  // il riallineamento avviene a ogni giro
+  realignT = mode === "polygon" ? cycleT / baseOsc : cycleT;
+
   pendulums = [];
   for (let i = 0; i < n; i++){
-    // esterno = lento = nota grave; interno = veloce = nota acuta
-    const osc = baseOsc + (n - 1 - i);        // oscillazioni complete per ciclo
-    const degree = n - 1 - i;                  // grado della scala
+    let hitPeriod, degree, sides = 0;
+    if (mode === "polygon"){
+      sides = 3 + i;                           // triangolo interno → poligoni via via più fitti
+      degree = i;                              // più vertici = più veloce = nota più acuta
+      hitPeriod = realignT / sides;            // una nota per vertice
+    } else {
+      // esterno = lento = nota grave; interno = veloce = nota acuta
+      const osc = baseOsc + (n - 1 - i);       // oscillazioni complete per ciclo
+      degree = n - 1 - i;
+      // un colpo per mezzo periodo (pendolo) o per giro completo (orbita)
+      hitPeriod = cycleT / (mode === "circle" ? osc : 2 * osc);
+    }
     const midi = rootMidi + 12 * Math.floor(degree / scale.length) + scale[degree % scale.length];
     pendulums.push({
-      i, osc,
-      // un colpo per mezzo periodo (pendolo) o per giro completo (orbita)
-      hitPeriod: cycleT / (mode === "circle" ? osc : 2 * osc),
+      i, sides, hitPeriod,
       freq: midiToFreq(midi),
       noteName: NOTE_NAMES[midi % 12] + (Math.floor(midi / 12) - 1),
       nextK: 1,                                // prossimo colpo da schedulare (k=0 è la partenza)
@@ -244,7 +256,10 @@ function schedule(){
     while (t < now + ahead){
       if (t > now - 0.05){
         let pan;
-        if (mode === "circle"){
+        if (mode === "polygon"){
+          // il pan segue la posizione del vertice colpito
+          pan = 0.75 * Math.cos(-Math.PI / 2 + 2 * Math.PI * (p.nextK % p.sides) / p.sides);
+        } else if (mode === "circle"){
           // tutte le orbite colpiscono in alto: apri lo stereo per indice
           pan = (p.i / n1 - 0.5) * 0.9;
         } else {
@@ -289,9 +304,10 @@ function draw(){
   const cx = W / 2;
   const panelH = panel.classList.contains("open") ? panel.offsetHeight : 54;
   const avail = H - panelH;
-  const circle = mode === "circle";
+  const circle = mode === "circle", poly = mode === "polygon";
+  const radial = circle || poly;
   let cy, maxR;
-  if (circle){
+  if (radial){
     // cerchi interi centrati nello spazio libero (sotto l'HUD)
     cy = Math.max(120, (avail + 44) / 2);
     maxR = Math.max(40, Math.min(W / 2 - 14, cy - 56, avail - cy - 16));
@@ -302,8 +318,8 @@ function draw(){
   }
   const minR = Math.max(26, maxR * 0.16);
 
-  if (circle){
-    // punto di innesco in alto
+  if (radial){
+    // punto di innesco in alto (nei poligoni: vertice comune)
     g.strokeStyle = "rgba(139,148,168,0.35)";
     g.lineWidth = 1;
     g.beginPath();
@@ -325,14 +341,22 @@ function draw(){
   for (const p of pendulums){
     const r = n === 1 ? maxR : minR + (maxR - minR) * (p.i / (n - 1));
     const phase = el / p.hitPeriod;             // colpo a ogni unità
-    let a;
-    if (circle){
-      a = -Math.PI / 2 + 2 * Math.PI * (phase % 1);       // giro completo, innesco in alto
+    const vAng = k => -Math.PI / 2 + 2 * Math.PI * k / p.sides; // angolo del vertice k
+    let x, y;
+    if (poly){
+      // percorso a velocità costante lungo il perimetro, vertice per vertice
+      const e = phase % p.sides, edge = Math.floor(e), f = e - edge;
+      const a1 = vAng(edge), a2 = vAng(edge + 1);
+      x = cx + r * (Math.cos(a1) * (1 - f) + Math.cos(a2) * f);
+      y = cy + r * (Math.sin(a1) * (1 - f) + Math.sin(a2) * f);
+    } else if (circle){
+      const a = -Math.PI / 2 + 2 * Math.PI * (phase % 1); // giro completo, innesco in alto
+      x = cx + r * Math.cos(a); y = cy + r * Math.sin(a);
     } else {
       const prog = 0.5 - 0.5 * Math.cos(Math.PI * phase); // 0..1 avanti e indietro
-      a = Math.PI + Math.PI * prog;                        // π (sx) → 2π (dx)
+      const a = Math.PI + Math.PI * prog;                  // π (sx) → 2π (dx)
+      x = cx + r * Math.cos(a); y = cy + r * Math.sin(a);
     }
-    const x = cx + r * Math.cos(a), y = cy + r * Math.sin(a);
 
     // colpo visivo
     const k = Math.floor(phase);
@@ -343,9 +367,26 @@ function draw(){
     g.strokeStyle = `hsla(${p.hue}, 70%, 65%, ${0.10 + 0.35 * p.flash})`;
     g.lineWidth = 1;
     g.beginPath();
-    if (circle) g.arc(cx, cy, r, 0, 2 * Math.PI);
+    if (poly){
+      for (let v = 0; v <= p.sides; v++){
+        const px = cx + r * Math.cos(vAng(v)), py = cy + r * Math.sin(vAng(v));
+        v ? g.lineTo(px, py) : g.moveTo(px, py);
+      }
+    } else if (circle) g.arc(cx, cy, r, 0, 2 * Math.PI);
     else g.arc(cx, cy, r, Math.PI, 2 * Math.PI);
     g.stroke();
+
+    // vertici del poligono, con quello appena colpito acceso
+    if (poly){
+      const hitV = Math.floor(phase) % p.sides;
+      for (let v = 0; v < p.sides; v++){
+        const lit = v === hitV ? p.flash : 0;
+        g.fillStyle = `hsla(${p.hue}, 80%, 70%, ${0.25 + 0.7 * lit})`;
+        g.beginPath();
+        g.arc(cx + r * Math.cos(vAng(v)), cy + r * Math.sin(vAng(v)), 2 + 3 * lit, 0, 7);
+        g.fill();
+      }
+    }
 
     // raggio che lega la pallina al centro
     if (circle){
@@ -362,9 +403,10 @@ function draw(){
     g.shadowBlur = 0;
   }
 
-  const rem = cycleT - (el % cycleT);
+  const rem = realignT - (el % realignT);
+  const word = poly ? "poligoni" : circle ? "orbite" : "pendoli";
   hud.innerHTML = actx
-    ? `<b>${n}</b> ${circle ? "orbite" : "pendoli"} · scala <b>${SCALES[+ui.scale.value][0]}</b> · riallineamento tra <b>${rem.toFixed(0)}s</b>`
+    ? `<b>${n}</b> ${word} · scala <b>${SCALES[+ui.scale.value][0]}</b> · riallineamento tra <b>${rem.toFixed(0)}s</b>`
     : "";
 }
 requestAnimationFrame(draw);

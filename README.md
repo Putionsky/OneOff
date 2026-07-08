@@ -14,8 +14,11 @@ per sbloccare l'audio. Il pannello **Impostazioni** in basso permette di:
 
 - **Pendoli (complessità)** — da 2 a 24 pendoli simultanei
 - **Visualizzazione** — pendoli su semicerchio (nota a ogni estremo
-  dell'oscillazione) oppure orbite su cerchio intero, legate al centro,
-  con nota al passaggio sul punto di innesco in alto
+  dell'oscillazione), orbite su cerchio intero legate al centro con nota
+  al passaggio sul punto di innesco in alto, oppure poligoni regolari
+  concentrici: tutti completano un giro nello stesso tempo e ogni vertice
+  suona una nota, quindi triangolo:quadrato:pentagono… danno un
+  poliritmo 3:4:5… che si riallinea a ogni giro
 - **Durata ciclo** — tempo di riallineamento completo (15–180 s)
 - **Oscillazioni base** — velocità del pendolo più lento (densità ritmica)
 - **Scala** — maggiore, minore naturale/armonica, dorica, lidia, misolidia,
