@@ -21,6 +21,10 @@ per sbloccare l'audio. Il pannello **Impostazioni** in basso permette di:
   oppure poligoni concentrici: anelli tutti con la stessa forma —
   numero di lati a scelta da 3 a 12 — dove come per i pendoli ogni
   anello interno gira più veloce di quello esterno
+- **Rosa del ciclo** — le corde che collegano gli elementi adiacenti si
+  accumulano su una tela persistente: nell'arco di un ciclo disegnano la
+  "rosa" geometrica del poliritmo, che si completa al riallineamento e
+  poi riparte
 - **Durata ciclo** — tempo di riallineamento completo (15–180 s)
 - **Oscillazioni base** — velocità del pendolo più lento (densità ritmica)
 - **Scala** — maggiore, minore naturale/armonica, dorica, lidia, misolidia,

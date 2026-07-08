@@ -89,6 +89,13 @@
       <input type="range" id="sides" min="3" max="12" step="1" value="3">
     </div>
     <div class="ctl">
+      <label>Rosa del ciclo</label>
+      <select id="rose">
+        <option value="on">Accesa</option>
+        <option value="off">Spenta</option>
+      </select>
+    </div>
+    <div class="ctl">
       <label>Durata ciclo <output id="cycleOut"></output></label>
       <input type="range" id="cycle" min="15" max="180" step="5" value="60">
     </div>
@@ -148,7 +155,7 @@ const canvas = $("stage"), hud = $("hud"), panel = $("panel");
 const ui = {
   nPend: $("nPend"), cycle: $("cycle"), base: $("base"), vol: $("vol"),
   scale: $("scale"), root: $("root"), octave: $("octave"), timbre: $("timbre"),
-  mode: $("mode"), sides: $("sides"),
+  mode: $("mode"), sides: $("sides"), rose: $("rose"),
 };
 SCALES.forEach(([name], i) => ui.scale.add(new Option(name, i)));
 NOTE_NAMES.forEach((n, i) => ui.root.add(new Option(n, i)));
@@ -254,6 +261,10 @@ function rebuild(keepPhase){
   // riallinea lo scheduler alla fase corrente
   const el = Math.max(0, now - t0);
   for (const p of pendulums) p.nextK = Math.floor(el / p.hitPeriod) + 1;
+
+  // la geometria è cambiata: la rosa riparte
+  lastCycleIdx = -1;
+  clearTrail();
 }
 
 /* ---------- scheduler audio (lookahead) ---------- */
@@ -287,6 +298,15 @@ setInterval(schedule, 30);
 
 /* ---------- disegno ---------- */
 const g = canvas.getContext("2d");
+// tela persistente per la rosa del ciclo (le corde si accumulano qui)
+const trail = document.createElement("canvas");
+const tg = trail.getContext("2d");
+let lastCycleIdx = -1;
+function clearTrail(){
+  tg.save(); tg.setTransform(1, 0, 0, 1, 0, 0);
+  tg.clearRect(0, 0, trail.width, trail.height);
+  tg.restore();
+}
 let W = 0, H = 0, DPR = 1;
 function resize(){
   DPR = Math.min(window.devicePixelRatio || 1, 2);
@@ -296,6 +316,8 @@ function resize(){
   canvas.style.width = W + "px"; canvas.style.height = H + "px";
   canvas.width = Math.round(W * DPR); canvas.height = Math.round(H * DPR);
   g.setTransform(DPR, 0, 0, DPR, 0, 0);
+  trail.width = canvas.width; trail.height = canvas.height;
+  tg.setTransform(DPR, 0, 0, DPR, 0, 0);
 }
 window.addEventListener("resize", resize);
 if (window.visualViewport) window.visualViewport.addEventListener("resize", resize);
@@ -309,6 +331,14 @@ function draw(){
 
   g.fillStyle = "rgba(11,14,20,0.5)";          // scia leggera
   g.fillRect(0, 0, W, H);
+
+  const roseOn = ui.rose.value === "on";
+  if (roseOn && actx){
+    // la rosa riparte a ogni riallineamento
+    const ci = Math.floor(el / realignT);
+    if (ci !== lastCycleIdx){ lastCycleIdx = ci; clearTrail(); }
+    g.drawImage(trail, 0, 0, W, H);
+  }
 
   const n = pendulums.length;
   const cx = W / 2;
@@ -348,6 +378,7 @@ function draw(){
   g.fillStyle = "rgba(232,236,244,0.8)";
   g.beginPath(); g.arc(cx, cy, 3, 0, 7); g.fill();
 
+  const pts = [];
   for (const p of pendulums){
     const r = n === 1 ? maxR : minR + (maxR - minR) * (p.i / (n - 1));
     const phase = el / p.hitPeriod;             // colpo a ogni unità
@@ -367,6 +398,7 @@ function draw(){
       const a = Math.PI + Math.PI * prog;                  // π (sx) → 2π (dx)
       x = cx + r * Math.cos(a); y = cy + r * Math.sin(a);
     }
+    pts.push([x, y, p.hue]);
 
     // colpo visivo
     const k = Math.floor(phase);
@@ -413,6 +445,20 @@ function draw(){
     g.shadowBlur = 0;
   }
 
+  // rosa: le corde tra palline adiacenti si accumulano sulla tela persistente
+  if (roseOn && actx && running && pts.length > 1){
+    // inchiostro proporzionale al ciclo: la rosa si completa senza saturare
+    const ink = Math.min(0.06, Math.max(0.006, 0.6 / realignT));
+    tg.lineWidth = 0.8;
+    for (let j = 0; j < pts.length - 1; j++){
+      tg.strokeStyle = `hsla(${(pts[j][2] + pts[j + 1][2]) / 2}, 80%, 65%, ${ink})`;
+      tg.beginPath();
+      tg.moveTo(pts[j][0], pts[j][1]);
+      tg.lineTo(pts[j + 1][0], pts[j + 1][1]);
+      tg.stroke();
+    }
+  }
+
   const rem = realignT - (el % realignT);
   const word = poly ? "poligoni" : circle ? "orbite" : "pendoli";
   hud.innerHTML = actx
@@ -445,6 +491,7 @@ document.addEventListener("pointerdown", () => {
 $("panelBar").addEventListener("click", e => {
   if (e.target.tagName === "BUTTON") return;
   panel.classList.toggle("open");
+  clearTrail();   // il pannello sposta la geometria: le corde vecchie non valgono più
 });
 
 // parametri strutturali → ricostruisci (riparte il ciclo)
@@ -459,6 +506,7 @@ function syncSidesCtl(){
 }
 ui.mode.addEventListener("change", syncSidesCtl);
 ui.sides.addEventListener("input", updateOutputs);
+ui.rose.addEventListener("change", () => { lastCycleIdx = -1; clearTrail(); });
 syncSidesCtl();
 ui.vol.addEventListener("input", () => {
   if (master) master.gain.value = +ui.vol.value / 100;
