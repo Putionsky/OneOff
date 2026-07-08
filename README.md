@@ -18,9 +18,14 @@ per sbloccare l'audio. Il pannello **Impostazioni** in basso permette di:
   al passaggio sul punto di innesco in alto, poligoni crescenti
   (triangolo, quadrato, pentagono… con lo stesso periodo di giro: i
   vertici danno un poliritmo 3:4:5… che si riallinea a ogni giro),
-  oppure poligoni concentrici: anelli tutti con la stessa forma —
+  poligoni concentrici: anelli tutti con la stessa forma —
   numero di lati a scelta da 3 a 12 — dove come per i pendoli ogni
-  anello interno gira più veloce di quello esterno
+  anello interno gira più veloce di quello esterno, oppure spirografo:
+  ogni voce è una penna su un doppio braccio rotante (il lungo gira
+  lento, il corto controruota veloce) che suona quando i bracci si
+  allineano sulla punta di un petalo; la curva epicicloidale, tracciata
+  dalla rosa, ha tanti petali quante sono le note per ciclo e si chiude
+  esattamente al riallineamento
 - **Rosa del ciclo** — le corde che collegano gli elementi adiacenti si
   accumulano su una tela persistente: nell'arco di un ciclo disegnano la
   "rosa" geometrica del poliritmo, che si completa al riallineamento e

@@ -82,6 +82,7 @@
         <option value="circle">Orbite (cerchio intero)</option>
         <option value="polygon">Poligoni crescenti (3,4,5…)</option>
         <option value="polyconc">Poligoni concentrici (n lati)</option>
+        <option value="spiro">Spirografo</option>
       </select>
     </div>
     <div class="ctl" id="sidesCtl" style="display:none">
@@ -231,7 +232,7 @@ function rebuild(keepPhase){
 
   pendulums = [];
   for (let i = 0; i < n; i++){
-    let hitPeriod, degree, sides = 0;
+    let hitPeriod, degree, sides = 0, spinSlow = 0, spinFast = 0;
     if (mode === "polygon"){
       sides = 3 + i;                           // triangolo interno → poligoni via via più fitti
       degree = i;                              // più vertici = più veloce = nota più acuta
@@ -241,6 +242,14 @@ function rebuild(keepPhase){
       const osc = baseOsc + (n - 1 - i);       // giri per ciclo: interno più veloce
       degree = n - 1 - i;
       hitPeriod = cycleT / (osc * sides);      // una nota per vertice
+    } else if (mode === "spiro"){
+      // doppio braccio: il lungo gira piano, il corto controruota veloce;
+      // i bracci si allineano (punta del petalo) hits volte per ciclo
+      const hits = baseOsc + (n - 1 - i);
+      degree = n - 1 - i;
+      hitPeriod = cycleT / hits;
+      spinSlow = 1 + (i % Math.max(1, Math.min(4, hits - 1))); // giri del braccio lungo
+      spinFast = hits - spinSlow;                              // controgiri del corto
     } else {
       // esterno = lento = nota grave; interno = veloce = nota acuta
       const osc = baseOsc + (n - 1 - i);       // oscillazioni complete per ciclo
@@ -250,7 +259,8 @@ function rebuild(keepPhase){
     }
     const midi = rootMidi + 12 * Math.floor(degree / scale.length) + scale[degree % scale.length];
     pendulums.push({
-      i, sides, hitPeriod,
+      i, sides, hitPeriod, spinSlow, spinFast,
+      px: NaN, py: NaN,
       freq: midiToFreq(midi),
       noteName: NOTE_NAMES[midi % 12] + (Math.floor(midi / 12) - 1),
       nextK: 1,                                // prossimo colpo da schedulare (k=0 è la partenza)
@@ -280,6 +290,10 @@ function schedule(){
         if (p.sides){
           // il pan segue la posizione del vertice colpito
           pan = 0.75 * Math.cos(-Math.PI / 2 + 2 * Math.PI * (p.nextK % p.sides) / p.sides);
+        } else if (mode === "spiro"){
+          // il pan segue la punta del petalo colpito
+          const hits = p.spinSlow + p.spinFast;
+          pan = 0.75 * Math.cos(-Math.PI / 2 + 2 * Math.PI * p.spinSlow * (p.nextK % hits) / hits);
         } else if (mode === "circle"){
           // tutte le orbite colpiscono in alto: apri lo stereo per indice
           pan = (p.i / n1 - 0.5) * 0.9;
@@ -306,6 +320,7 @@ function clearTrail(){
   tg.save(); tg.setTransform(1, 0, 0, 1, 0, 0);
   tg.clearRect(0, 0, trail.width, trail.height);
   tg.restore();
+  for (const p of pendulums){ p.px = NaN; p.py = NaN; } // niente segmenti-ponte
 }
 let W = 0, H = 0, DPR = 1;
 function resize(){
@@ -345,7 +360,8 @@ function draw(){
   const panelH = panel.classList.contains("open") ? panel.offsetHeight : 54;
   const avail = H - panelH;
   const circle = mode === "circle", poly = mode === "polygon" || mode === "polyconc";
-  const radial = circle || poly;
+  const spiro = mode === "spiro";
+  const radial = circle || poly || spiro;
   let cy, maxR;
   if (radial){
     // cerchi interi centrati nello spazio libero (sotto l'HUD)
@@ -358,7 +374,9 @@ function draw(){
   }
   const minR = Math.max(26, maxR * 0.16);
 
-  if (radial){
+  if (spiro){
+    // niente linea di innesco: i petali sbocciano tutt'intorno
+  } else if (radial){
     // punto di innesco in alto (nei poligoni: vertice comune)
     g.strokeStyle = "rgba(139,148,168,0.35)";
     g.lineWidth = 1;
@@ -383,8 +401,16 @@ function draw(){
     const r = n === 1 ? maxR : minR + (maxR - minR) * (p.i / (n - 1));
     const phase = el / p.hitPeriod;             // colpo a ogni unità
     const vAng = k => -Math.PI / 2 + 2 * Math.PI * k / p.sides; // angolo del vertice k
-    let x, y;
-    if (poly){
+    let x, y, elbowX, elbowY;
+    if (spiro){
+      // epiciclo: braccio lungo lento + braccio corto controrotante
+      const u = el / cycleT;
+      const a1 = -Math.PI / 2 + 2 * Math.PI * p.spinSlow * u;
+      const a2 = -Math.PI / 2 - 2 * Math.PI * p.spinFast * u;
+      const r1 = r * 0.72, r2 = r * 0.28;
+      elbowX = cx + r1 * Math.cos(a1); elbowY = cy + r1 * Math.sin(a1);
+      x = elbowX + r2 * Math.cos(a2); y = elbowY + r2 * Math.sin(a2);
+    } else if (poly){
       // percorso a velocità costante lungo il perimetro, vertice per vertice
       const e = phase % p.sides, edge = Math.floor(e), f = e - edge;
       const a1 = vAng(edge), a2 = vAng(edge + 1);
@@ -405,35 +431,52 @@ function draw(){
     if (k > p.lastVisK){ p.lastVisK = k; p.flash = 1; }
     p.flash *= 0.90;
 
-    // guida
-    g.strokeStyle = `hsla(${p.hue}, 70%, 65%, ${0.10 + 0.35 * p.flash})`;
-    g.lineWidth = 1;
-    g.beginPath();
-    if (poly){
-      for (let v = 0; v <= p.sides; v++){
-        const px = cx + r * Math.cos(vAng(v)), py = cy + r * Math.sin(vAng(v));
-        v ? g.lineTo(px, py) : g.moveTo(px, py);
+    // spirografo: bracci visibili e scia della penna al posto delle corde
+    if (spiro){
+      g.strokeStyle = `hsla(${p.hue}, 70%, 65%, ${0.14 + 0.4 * p.flash})`;
+      g.lineWidth = 1;
+      g.beginPath();
+      g.moveTo(cx, cy); g.lineTo(elbowX, elbowY); g.lineTo(x, y);
+      g.stroke();
+      if (roseOn && running && isFinite(p.px)){
+        tg.strokeStyle = `hsla(${p.hue}, 80%, 65%, 0.45)`;
+        tg.lineWidth = 1.1;
+        tg.beginPath(); tg.moveTo(p.px, p.py); tg.lineTo(x, y); tg.stroke();
       }
-    } else if (circle) g.arc(cx, cy, r, 0, 2 * Math.PI);
-    else g.arc(cx, cy, r, Math.PI, 2 * Math.PI);
-    g.stroke();
-
-    // vertici del poligono, con quello appena colpito acceso
-    if (poly){
-      const hitV = Math.floor(phase) % p.sides;
-      for (let v = 0; v < p.sides; v++){
-        const lit = v === hitV ? p.flash : 0;
-        g.fillStyle = `hsla(${p.hue}, 80%, 70%, ${0.25 + 0.7 * lit})`;
-        g.beginPath();
-        g.arc(cx + r * Math.cos(vAng(v)), cy + r * Math.sin(vAng(v)), 2 + 3 * lit, 0, 7);
-        g.fill();
-      }
+      p.px = x; p.py = y;
     }
 
-    // raggio che lega la pallina al centro
-    if (circle){
-      g.strokeStyle = `hsla(${p.hue}, 70%, 65%, ${0.22 + 0.5 * p.flash})`;
-      g.beginPath(); g.moveTo(cx, cy); g.lineTo(x, y); g.stroke();
+    // guida (lo spirografo non ne ha: la scia della penna è la figura)
+    if (!spiro){
+      g.strokeStyle = `hsla(${p.hue}, 70%, 65%, ${0.10 + 0.35 * p.flash})`;
+      g.lineWidth = 1;
+      g.beginPath();
+      if (poly){
+        for (let v = 0; v <= p.sides; v++){
+          const px = cx + r * Math.cos(vAng(v)), py = cy + r * Math.sin(vAng(v));
+          v ? g.lineTo(px, py) : g.moveTo(px, py);
+        }
+      } else if (circle) g.arc(cx, cy, r, 0, 2 * Math.PI);
+      else g.arc(cx, cy, r, Math.PI, 2 * Math.PI);
+      g.stroke();
+
+      // vertici del poligono, con quello appena colpito acceso
+      if (poly){
+        const hitV = Math.floor(phase) % p.sides;
+        for (let v = 0; v < p.sides; v++){
+          const lit = v === hitV ? p.flash : 0;
+          g.fillStyle = `hsla(${p.hue}, 80%, 70%, ${0.25 + 0.7 * lit})`;
+          g.beginPath();
+          g.arc(cx + r * Math.cos(vAng(v)), cy + r * Math.sin(vAng(v)), 2 + 3 * lit, 0, 7);
+          g.fill();
+        }
+      }
+
+      // raggio che lega la pallina al centro
+      if (circle){
+        g.strokeStyle = `hsla(${p.hue}, 70%, 65%, ${0.22 + 0.5 * p.flash})`;
+        g.beginPath(); g.moveTo(cx, cy); g.lineTo(x, y); g.stroke();
+      }
     }
 
     // pallina
@@ -446,7 +489,8 @@ function draw(){
   }
 
   // rosa: le corde tra palline adiacenti si accumulano sulla tela persistente
-  if (roseOn && actx && running && pts.length > 1){
+  // (nello spirografo la scia è quella della penna, già tracciata sopra)
+  if (!spiro && roseOn && actx && running && pts.length > 1){
     // inchiostro proporzionale al ciclo: la rosa si completa senza saturare
     const ink = Math.min(0.06, Math.max(0.006, 0.6 / realignT));
     tg.lineWidth = 0.8;
@@ -460,7 +504,7 @@ function draw(){
   }
 
   const rem = realignT - (el % realignT);
-  const word = poly ? "poligoni" : circle ? "orbite" : "pendoli";
+  const word = spiro ? "penne" : poly ? "poligoni" : circle ? "orbite" : "pendoli";
   hud.innerHTML = actx
     ? `<b>${n}</b> ${word} · scala <b>${SCALES[+ui.scale.value][0]}</b> · riallineamento tra <b>${rem.toFixed(0)}s</b>`
     : "";
