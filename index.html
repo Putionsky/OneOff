@@ -105,6 +105,26 @@
       </select>
     </div>
     <div class="ctl">
+      <label>Sdoppiamento (tempo voce B)</label>
+      <select id="split">
+        <option value="off">Spento</option>
+        <option value="1/2">B a metà velocità</option>
+        <option value="1/3">B a un terzo</option>
+        <option value="2/3">B a due terzi</option>
+        <option value="3/4">B a tre quarti</option>
+        <option value="1/1">B alla pari (ottave parallele)</option>
+        <option value="2/1">B a velocità doppia</option>
+        <option value="3/1">B a velocità tripla</option>
+      </select>
+    </div>
+    <div class="ctl splitOnly" style="display:none">
+      <label>Ottave (voce A / voce B)</label>
+      <div class="row">
+        <select id="octA"></select>
+        <select id="octB"></select>
+      </div>
+    </div>
+    <div class="ctl">
       <label>Rosa del ciclo</label>
       <select id="rose">
         <option value="on">Accesa</option>
@@ -173,11 +193,16 @@ const ui = {
   scale: $("scale"), root: $("root"), octave: $("octave"), timbre: $("timbre"),
   mode: $("mode"), sides: $("sides"), rose: $("rose"),
   spinS: $("spinS"), armRatio: $("armRatio"), spiroStyle: $("spiroStyle"),
+  split: $("split"), octA: $("octA"), octB: $("octB"),
 };
 SCALES.forEach(([name], i) => ui.scale.add(new Option(name, i)));
 NOTE_NAMES.forEach((n, i) => ui.root.add(new Option(n, i)));
 [2,3,4].forEach(o => ui.octave.add(new Option("Ottava " + o, o)));
 ui.octave.value = "3";
+for (const [sel, def, tag] of [[ui.octA, -1, "A"], [ui.octB, 1, "B"]]){
+  for (let o = -2; o <= 2; o++) sel.add(new Option(`${tag}: ${o > 0 ? "+" : ""}${o} ott.`, o));
+  sel.value = String(def);
+}
 
 /* ---------- audio ---------- */
 let actx = null, master = null;
@@ -230,7 +255,7 @@ function playNote(freq, when, pan){
 }
 
 /* ---------- modello pendoli ---------- */
-let pendulums = [], t0 = 0, cycleT = 60, realignT = 60, running = true, mode = "pendulum";
+let pendulums = [], t0 = 0, cycleT = 60, realignT = 60, running = true, mode = "pendulum", splitOn = false;
 
 function rebuild(keepPhase){
   const n = +ui.nPend.value;
@@ -242,9 +267,16 @@ function rebuild(keepPhase){
   const now = actx ? actx.currentTime : 0;
   if (!keepPhase) t0 = now;
 
+  // sdoppiamento: la voce B viaggia a num/den della velocità della A,
+  // quindi il sistema completo si riallinea ogni den cicli
+  splitOn = ui.split.value !== "off";
+  let num = 1, den = 1;
+  if (splitOn) [num, den] = ui.split.value.split("/").map(Number);
+
   // poligoni: tutti girano insieme, il poliritmo nasce dal numero di vertici;
-  // il riallineamento avviene a ogni giro
-  realignT = mode === "polygon" ? cycleT / baseOsc : cycleT;
+  // il riallineamento (della voce A) avviene a ogni giro
+  const baseRealign = mode === "polygon" ? cycleT / baseOsc : cycleT;
+  realignT = baseRealign * den;
 
   pendulums = [];
   for (let i = 0; i < n; i++){
@@ -252,7 +284,7 @@ function rebuild(keepPhase){
     if (mode === "polygon"){
       sides = 3 + i;                           // triangolo interno → poligoni via via più fitti
       degree = i;                              // più vertici = più veloce = nota più acuta
-      hitPeriod = realignT / sides;            // una nota per vertice
+      hitPeriod = baseRealign / sides;         // una nota per vertice
     } else if (mode === "polyconc"){
       sides = +ui.sides.value;                 // stessa forma per tutti gli anelli
       const osc = baseOsc + (n - 1 - i);       // giri per ciclo: interno più veloce
@@ -283,16 +315,21 @@ function rebuild(keepPhase){
       hitPeriod = cycleT / (mode === "circle" ? osc : 2 * osc);
     }
     const midi = rootMidi + 12 * Math.floor(degree / scale.length) + scale[degree % scale.length];
-    pendulums.push({
-      i, sides, hitPeriod, spinSlow, spinFast,
-      dir: mode === "spiro" && ui.spiroStyle.value === "co" ? 1 : -1,
+    const frac = n === 1 ? 1 : i / (n - 1);
+    const hue = 275 - 235 * (n === 1 ? 0 : i / (n - 1));
+    const dir = mode === "spiro" && ui.spiroStyle.value === "co" ? 1 : -1;
+    // ogni anello ospita la voce A e, se sdoppiato, la voce B che condivide
+    // la geometria ma viaggia a tScale della velocità e in un'altra ottava
+    const mkVoice = (layer, tScale, octShift) => ({
+      i, frac, layer, tScale, sides, spinSlow, spinFast, dir,
+      hitPeriod: hitPeriod / tScale,
       px: NaN, py: NaN,
-      freq: midiToFreq(midi),
-      noteName: NOTE_NAMES[midi % 12] + (Math.floor(midi / 12) - 1),
+      freq: midiToFreq(midi + 12 * octShift),
       nextK: 1,                                // prossimo colpo da schedulare (k=0 è la partenza)
-      lastVisK: 0, flash: 0,
-      hue: 275 - 235 * (n === 1 ? 0 : i / (n - 1)),
+      lastVisK: 0, flash: 0, hue,
     });
+    pendulums.push(mkVoice(0, 1, splitOn ? +ui.octA.value : 0));
+    if (splitOn) pendulums.push(mkVoice(1, num / den, +ui.octB.value));
   }
   // riallinea lo scheduler alla fase corrente
   const el = Math.max(0, now - t0);
@@ -307,7 +344,6 @@ function rebuild(keepPhase){
 function schedule(){
   if (!actx || !running) return;
   const now = actx.currentTime, ahead = 0.18;
-  const n1 = Math.max(1, pendulums.length - 1);
   for (const p of pendulums){
     let t = t0 + p.nextK * p.hitPeriod;
     while (t < now + ahead){
@@ -321,11 +357,11 @@ function schedule(){
           const hits = p.spinSlow + p.spinFast;
           pan = 0.75 * Math.cos(-Math.PI / 2 + 2 * Math.PI * p.spinSlow * (p.nextK % hits) / hits);
         } else if (mode === "circle"){
-          // tutte le orbite colpiscono in alto: apri lo stereo per indice
-          pan = (p.i / n1 - 0.5) * 0.9;
+          // tutte le orbite colpiscono in alto: apri lo stereo per anello
+          pan = (p.frac - 0.5) * 0.9;
         } else {
           const side = (p.nextK % 2 === 1) ? 1 : -1; // dispari = estremo destro
-          pan = side * (0.15 + 0.55 * (p.i / n1));
+          pan = side * (0.15 + 0.55 * p.frac);
         }
         playNote(p.freq, Math.max(t, now + 0.001), pan);
       }
@@ -381,7 +417,6 @@ function draw(){
     g.drawImage(trail, 0, 0, W, H);
   }
 
-  const n = pendulums.length;
   const cx = W / 2;
   const panelH = panel.classList.contains("open") ? panel.offsetHeight : 54;
   const avail = H - panelH;
@@ -422,15 +457,15 @@ function draw(){
   g.fillStyle = "rgba(232,236,244,0.8)";
   g.beginPath(); g.arc(cx, cy, 3, 0, 7); g.fill();
 
-  const pts = [];
+  const pts = [], ptsB = [];
   for (const p of pendulums){
-    const r = n === 1 ? maxR : minR + (maxR - minR) * (p.i / (n - 1));
+    const r = minR + (maxR - minR) * p.frac;
     const phase = el / p.hitPeriod;             // colpo a ogni unità
     const vAng = k => -Math.PI / 2 + 2 * Math.PI * k / p.sides; // angolo del vertice k
     let x, y, elbowX, elbowY;
     if (spiro){
       // epiciclo: braccio lungo lento + braccio corto (contro)rotante veloce
-      const u = el / cycleT;
+      const u = el * p.tScale / cycleT;
       const a1 = -Math.PI / 2 + 2 * Math.PI * p.spinSlow * u;
       const a2 = -Math.PI / 2 + p.dir * 2 * Math.PI * p.spinFast * u;
       const pen = +ui.armRatio.value / 100;
@@ -451,7 +486,7 @@ function draw(){
       const a = Math.PI + Math.PI * prog;                  // π (sx) → 2π (dx)
       x = cx + r * Math.cos(a); y = cy + r * Math.sin(a);
     }
-    pts.push([x, y, p.hue]);
+    (p.layer ? ptsB : pts).push([x, y, p.hue]);
 
     // colpo visivo
     const k = Math.floor(phase);
@@ -473,8 +508,8 @@ function draw(){
       p.px = x; p.py = y;
     }
 
-    // guida (lo spirografo non ne ha: la scia della penna è la figura)
-    if (!spiro){
+    // guida (lo spirografo non ne ha; la voce B condivide quella della A)
+    if (!spiro && p.layer === 0){
       g.strokeStyle = `hsla(${p.hue}, 70%, 65%, ${0.10 + 0.35 * p.flash})`;
       g.lineWidth = 1;
       g.beginPath();
@@ -498,42 +533,51 @@ function draw(){
           g.fill();
         }
       }
-
-      // raggio che lega la pallina al centro
-      if (circle){
-        g.strokeStyle = `hsla(${p.hue}, 70%, 65%, ${0.22 + 0.5 * p.flash})`;
-        g.beginPath(); g.moveTo(cx, cy); g.lineTo(x, y); g.stroke();
-      }
     }
 
-    // pallina
+    // raggio che lega la pallina al centro
+    if (circle){
+      g.strokeStyle = `hsla(${p.hue}, 70%, 65%, ${0.22 + 0.5 * p.flash})`;
+      g.lineWidth = 1;
+      g.beginPath(); g.moveTo(cx, cy); g.lineTo(x, y); g.stroke();
+    }
+
+    // pallina: voce A piena, voce B anello vuoto
     const rad = 5 + Math.min(9, maxR / 40) + 4 * p.flash;
     g.shadowColor = `hsla(${p.hue}, 85%, 65%, 0.9)`;
     g.shadowBlur = 12 + 26 * p.flash;
-    g.fillStyle = `hsl(${p.hue}, 85%, ${62 + 25 * p.flash}%)`;
-    g.beginPath(); g.arc(x, y, rad, 0, 7); g.fill();
+    if (p.layer){
+      g.strokeStyle = `hsl(${p.hue}, 85%, ${62 + 25 * p.flash}%)`;
+      g.lineWidth = 3;
+      g.beginPath(); g.arc(x, y, rad * 0.85, 0, 7); g.stroke();
+    } else {
+      g.fillStyle = `hsl(${p.hue}, 85%, ${62 + 25 * p.flash}%)`;
+      g.beginPath(); g.arc(x, y, rad, 0, 7); g.fill();
+    }
     g.shadowBlur = 0;
   }
 
-  // rosa: le corde tra palline adiacenti si accumulano sulla tela persistente
+  // rosa: le corde tra palline adiacenti (per strato) si accumulano sulla tela
   // (nello spirografo la scia è quella della penna, già tracciata sopra)
-  if (!spiro && roseOn && actx && running && pts.length > 1){
+  if (!spiro && roseOn && actx && running){
     // inchiostro proporzionale al ciclo: la rosa si completa senza saturare
     const ink = Math.min(0.06, Math.max(0.006, 0.6 / realignT));
     tg.lineWidth = 0.8;
-    for (let j = 0; j < pts.length - 1; j++){
-      tg.strokeStyle = `hsla(${(pts[j][2] + pts[j + 1][2]) / 2}, 80%, 65%, ${ink})`;
-      tg.beginPath();
-      tg.moveTo(pts[j][0], pts[j][1]);
-      tg.lineTo(pts[j + 1][0], pts[j + 1][1]);
-      tg.stroke();
+    for (const chain of [pts, ptsB]){
+      for (let j = 0; j < chain.length - 1; j++){
+        tg.strokeStyle = `hsla(${(chain[j][2] + chain[j + 1][2]) / 2}, 80%, 65%, ${ink})`;
+        tg.beginPath();
+        tg.moveTo(chain[j][0], chain[j][1]);
+        tg.lineTo(chain[j + 1][0], chain[j + 1][1]);
+        tg.stroke();
+      }
     }
   }
 
   const rem = realignT - (el % realignT);
   const word = spiro ? "penne" : poly ? "poligoni" : circle ? "orbite" : "pendoli";
   hud.innerHTML = actx
-    ? `<b>${n}</b> ${word} · scala <b>${SCALES[+ui.scale.value][0]}</b> · riallineamento tra <b>${rem.toFixed(0)}s</b>`
+    ? `<b>${+ui.nPend.value}</b>${splitOn ? "×2" : ""} ${word} · scala <b>${SCALES[+ui.scale.value][0]}</b> · riallineamento tra <b>${rem.toFixed(0)}s</b>`
     : "";
 }
 requestAnimationFrame(draw);
@@ -569,15 +613,18 @@ $("panelBar").addEventListener("click", e => {
 for (const id of ["nPend", "cycle", "base"])
   ui[id].addEventListener("change", () => { if (actx) rebuild(false); updateOutputs(); });
 // parametri musicali/visivi → aggiorna senza perdere la fase
-for (const id of ["scale", "root", "octave", "mode", "sides", "spinS", "armRatio", "spiroStyle"])
+for (const id of ["scale", "root", "octave", "mode", "sides", "spinS", "armRatio", "spiroStyle", "split", "octA", "octB"])
   ui[id].addEventListener("change", () => { if (actx) rebuild(true); });
 // controlli specifici della modalità selezionata
 function syncSidesCtl(){
   $("sidesCtl").style.display = ui.mode.value === "polyconc" ? "" : "none";
   for (const el of document.querySelectorAll(".spiroOnly"))
     el.style.display = ui.mode.value === "spiro" ? "" : "none";
+  for (const el of document.querySelectorAll(".splitOnly"))
+    el.style.display = ui.split.value !== "off" ? "" : "none";
 }
 ui.mode.addEventListener("change", syncSidesCtl);
+ui.split.addEventListener("change", syncSidesCtl);
 ui.sides.addEventListener("input", updateOutputs);
 ui.spinS.addEventListener("input", updateOutputs);
 ui.armRatio.addEventListener("input", updateOutputs);

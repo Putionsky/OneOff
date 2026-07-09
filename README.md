@@ -29,6 +29,12 @@ per sbloccare l'audio. Il pannello **Impostazioni** in basso permette di:
   lungo (Auto = varia per voce), lunghezza della penna (10–80% del
   raggio) e stile dei petali — punte (bracci controrotanti) o ricci
   (bracci corotanti)
+- **Sdoppiamento** — il poliritmo si sdoppia in due voci per anello:
+  la voce A (pallina piena) e la voce B (anello vuoto) condividono la
+  geometria ma la B viaggia a un rapporto di tempo a scelta (metà, un
+  terzo, due terzi, tre quarti, pari, doppia, tripla) e ciascuna voce
+  può essere spostata di ottava (da −2 a +2, default A −1 / B +1);
+  il riallineamento del sistema si estende di conseguenza
 - **Rosa del ciclo** — le corde che collegano gli elementi adiacenti si
   accumulano su una tela persistente: nell'arco di un ciclo disegnano la
   "rosa" geometrica del poliritmo, che si completa al riallineamento e
