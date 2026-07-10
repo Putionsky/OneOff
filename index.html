@@ -256,19 +256,26 @@ function playNote(freq, when, pan){
     o.connect(g).connect(dest);
     o.start(when); o.stop(when + decay + 0.1);
   };
+  // compensazione note gravi: i piccoli altoparlanti non riproducono le
+  // fondamentali sotto ~200 Hz; alza il livello e aggiungi armonici così
+  // l'orecchio ricostruisce il basso (fondamentale mancante)
+  const lowBoost = Math.min(2, Math.max(1, Math.sqrt(220 / freq)));
+  const hx = Math.min(0.7, Math.max(0, 140 / freq - 0.5));
+
   if (timbre === "pluck"){
-    env(0.5, 0.35);
+    env(0.5 * lowBoost, 0.35);
     mk("triangle", freq, 1, 0.35);
-    mk("triangle", freq * 2, 0.25, 0.2);
+    mk("triangle", freq * 2, 0.25 + hx * 0.5, 0.2);
   } else if (timbre === "bell"){
-    env(0.4, 1.6);
+    env(0.4 * lowBoost, 1.6);
     mk("sine", freq, 1, 1.6);
-    mk("sine", freq * 2.76, 0.3, 0.9);
+    mk("sine", freq * 2.76, 0.3 + hx * 0.4, 0.9);
     mk("sine", freq * 4.07, 0.12, 0.5);
   } else { // morbido
-    env(0.45, 0.9);
+    env(0.45 * lowBoost, 0.9);
     mk("sine", freq, 1, 0.9);
-    mk("sine", freq * 2, 0.15, 0.5);
+    mk("sine", freq * 2, 0.15 + hx, 0.5);
+    if (hx > 0.05) mk("sine", freq * 3, hx * 0.6, 0.4);
   }
 }
 
