@@ -42,6 +42,8 @@
     border-radius:10px; padding:8px 10px; min-height:40px; width:100%;}
   .row{display:flex; gap:8px;}
   .row>*{flex:1;}
+  #midiStatus{font-size:11px; color:var(--dim); line-height:1.5;}
+  #midiStatus a{color:var(--accent);}
 
   /* overlay avvio */
   #overlay{position:fixed; inset:0; background:rgba(11,14,20,.86); backdrop-filter:blur(6px);
@@ -168,6 +170,7 @@
         <button id="midiScan" type="button">🎹 Cerca</button>
         <select id="midiOut"><option value="">Spenta</option></select>
       </div>
+      <div id="midiStatus"></div>
     </div>
     <div class="ctl midiOnly" style="display:none">
       <label>Audio interno con MIDI attivo</label>
@@ -277,6 +280,8 @@ function syncMidiCtl(){
     el.style.display = midiPort ? "" : "none";
 }
 
+function setMidiStatus(html){ $("midiStatus").innerHTML = html; }
+
 function populateMidiOuts(){
   const sel = ui.midiOut, prev = sel.value;
   while (sel.options.length > 1) sel.remove(1);
@@ -285,21 +290,36 @@ function populateMidiOuts(){
   sel.value = midiAccess && midiAccess.outputs.has(prev) ? prev : "";
   midiPort = midiAccess ? midiAccess.outputs.get(sel.value) || null : null;
   syncMidiCtl();
+  if (midiAccess){
+    const nOut = midiAccess.outputs.size;
+    setMidiStatus(nOut
+      ? `${nOut} uscit${nOut === 1 ? "a" : "e"} MIDI disponibil${nOut === 1 ? "e" : "i"}. Scegli dal menu.`
+      : "Accesso ok ma nessuna uscita trovata: collega un'interfaccia o crea una porta " +
+        "virtuale (loopMIDI su Windows, IAC su macOS). Le porte nuove appaiono da sole.");
+  }
 }
 
 $("midiScan").addEventListener("click", async () => {
-  if (!navigator.requestMIDIAccess){
-    alert("Web MIDI non è supportata da questo browser (usa Chrome, Edge o Firefox).");
+  if (!window.isSecureContext){
+    setMidiStatus("Contesto non sicuro: Web MIDI richiede una pagina https o un file locale.");
     return;
   }
+  if (!navigator.requestMIDIAccess){
+    setMidiStatus("Web MIDI non è supportata da questo browser: usa Chrome, Edge o Firefox.");
+    return;
+  }
+  setMidiStatus("Richiesta accesso MIDI…");
   try {
     midiAccess = await navigator.requestMIDIAccess();
     midiAccess.addEventListener("statechange", populateMidiOuts);
     populateMidiOuts();
-    if (!midiAccess.outputs.size)
-      alert("Nessuna uscita MIDI trovata. Collega un'interfaccia o crea una porta virtuale (loopMIDI su Windows, IAC su macOS) e ripremi Cerca.");
   } catch (e){
-    alert("Accesso MIDI negato o non disponibile: " + e.message);
+    const inFrame = window.top !== window.self;
+    setMidiStatus(inFrame
+      ? `Accesso bloccato (${e.name}): questa pagina è dentro un frame che non concede il MIDI. ` +
+        `<a href="${location.href}" target="_blank" rel="noopener">Aprila in una scheda separata</a> e ripremi Cerca.`
+      : `Accesso bloccato (${e.name}). Controlla il permesso MIDI del sito ` +
+        `(icona lucchetto nella barra dell'indirizzo) e ripremi Cerca.`);
   }
 });
 
