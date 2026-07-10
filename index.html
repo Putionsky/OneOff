@@ -162,6 +162,20 @@
       <label>Volume <output id="volOut"></output></label>
       <input type="range" id="vol" min="0" max="100" step="1" value="70">
     </div>
+    <div class="ctl">
+      <label>Uscita MIDI (A→can.1, B→can.2)</label>
+      <div class="row">
+        <button id="midiScan" type="button">🎹 Cerca</button>
+        <select id="midiOut"><option value="">Spenta</option></select>
+      </div>
+    </div>
+    <div class="ctl midiOnly" style="display:none">
+      <label>Audio interno con MIDI attivo</label>
+      <select id="midiLocal">
+        <option value="on">Acceso</option>
+        <option value="off">Spento (solo synth)</option>
+      </select>
+    </div>
   </div>
 </div>
 
@@ -194,6 +208,7 @@ const ui = {
   mode: $("mode"), sides: $("sides"), rose: $("rose"),
   spinS: $("spinS"), armRatio: $("armRatio"), spiroStyle: $("spiroStyle"),
   split: $("split"), octA: $("octA"), octB: $("octB"),
+  midiOut: $("midiOut"), midiLocal: $("midiLocal"),
 };
 SCALES.forEach(([name], i) => ui.scale.add(new Option(name, i)));
 NOTE_NAMES.forEach((n, i) => ui.root.add(new Option(n, i)));
@@ -252,6 +267,60 @@ function playNote(freq, when, pan){
     mk("sine", freq, 1, 0.9);
     mk("sine", freq * 2, 0.15, 0.5);
   }
+}
+
+/* ---------- MIDI verso synth esterni ---------- */
+let midiAccess = null, midiPort = null;
+
+function syncMidiCtl(){
+  for (const el of document.querySelectorAll(".midiOnly"))
+    el.style.display = midiPort ? "" : "none";
+}
+
+function populateMidiOuts(){
+  const sel = ui.midiOut, prev = sel.value;
+  while (sel.options.length > 1) sel.remove(1);
+  if (midiAccess)
+    for (const out of midiAccess.outputs.values()) sel.add(new Option(out.name, out.id));
+  sel.value = midiAccess && midiAccess.outputs.has(prev) ? prev : "";
+  midiPort = midiAccess ? midiAccess.outputs.get(sel.value) || null : null;
+  syncMidiCtl();
+}
+
+$("midiScan").addEventListener("click", async () => {
+  if (!navigator.requestMIDIAccess){
+    alert("Web MIDI non è supportata da questo browser (usa Chrome, Edge o Firefox).");
+    return;
+  }
+  try {
+    midiAccess = await navigator.requestMIDIAccess();
+    midiAccess.addEventListener("statechange", populateMidiOuts);
+    populateMidiOuts();
+    if (!midiAccess.outputs.size)
+      alert("Nessuna uscita MIDI trovata. Collega un'interfaccia o crea una porta virtuale (loopMIDI su Windows, IAC su macOS) e ripremi Cerca.");
+  } catch (e){
+    alert("Accesso MIDI negato o non disponibile: " + e.message);
+  }
+});
+
+ui.midiOut.addEventListener("change", () => {
+  midiPanic();
+  midiPort = midiAccess ? midiAccess.outputs.get(ui.midiOut.value) || null : null;
+  syncMidiCtl();
+});
+
+// nota on/off con timestamp allineato al clock audio (voce A→can.1, B→can.2)
+function sendMidiNote(p, when){
+  const ts = performance.now() + Math.max(0, (when - actx.currentTime) * 1000);
+  const ch = p.layer ? 1 : 0;
+  const gate = Math.max(60, Math.min(400, p.hitPeriod * 500)); // ms
+  midiPort.send([0x90 | ch, p.midi, 100], ts);
+  midiPort.send([0x80 | ch, p.midi, 0], ts + gate);
+}
+
+function midiPanic(){
+  if (!midiPort) return;
+  for (const ch of [0, 1]) midiPort.send([0xB0 | ch, 123, 0]); // all notes off
 }
 
 /* ---------- modello pendoli ---------- */
@@ -324,6 +393,7 @@ function rebuild(keepPhase){
       i, frac, layer, tScale, sides, spinSlow, spinFast, dir,
       hitPeriod: hitPeriod / tScale,
       px: NaN, py: NaN,
+      midi: Math.max(0, Math.min(127, midi + 12 * octShift)),
       freq: midiToFreq(midi + 12 * octShift),
       nextK: 1,                                // prossimo colpo da schedulare (k=0 è la partenza)
       lastVisK: 0, flash: 0, hue,
@@ -363,7 +433,9 @@ function schedule(){
           const side = (p.nextK % 2 === 1) ? 1 : -1; // dispari = estremo destro
           pan = side * (0.15 + 0.55 * p.frac);
         }
-        playNote(p.freq, Math.max(t, now + 0.001), pan);
+        const when = Math.max(t, now + 0.001);
+        if (!midiPort || ui.midiLocal.value === "on") playNote(p.freq, when, pan);
+        if (midiPort) sendMidiNote(p, when);
       }
       p.nextK++;
       t = t0 + p.nextK * p.hitPeriod;
@@ -594,7 +666,7 @@ $("playBtn").addEventListener("click", () => {
   if (!actx) return;
   running = !running;
   if (running){ actx.resume(); $("playBtn").textContent = "⏸ Pausa"; }
-  else { actx.suspend(); $("playBtn").textContent = "▶ Riprendi"; }
+  else { actx.suspend(); midiPanic(); $("playBtn").textContent = "▶ Riprendi"; }
 });
 $("resetBtn").addEventListener("click", () => { if (actx) rebuild(false); });
 

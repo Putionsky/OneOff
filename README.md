@@ -47,6 +47,16 @@ per sbloccare l'audio. Il pannello **Impostazioni** in basso permette di:
 - **Timbro** — morbido, pluck, campana
 - **Volume**, pausa/riprendi e reset del ciclo
 
+### Uscita MIDI verso synth esterni
+Dal pannello, il pulsante **🎹 Cerca** richiede l'accesso Web MIDI
+(Chrome, Edge o Firefox) ed elenca le porte disponibili: interfacce
+USB-MIDI verso hardware, oppure porte virtuali (loopMIDI su Windows,
+IAC Driver su macOS) verso DAW e soft-synth. Le note viaggiano con
+timestamp allineati allo scheduler audio; la voce A esce sul canale 1
+e la voce B sul canale 2, così si possono assegnare due suoni diversi.
+Con il MIDI attivo si può spegnere l'audio interno per sentire solo il
+synth. Alla pausa viene inviato un all-notes-off.
+
 ### Note tecniche
 - Audio: Web Audio API con scheduler lookahead sincronizzato su
   `AudioContext.currentTime`, compressore sul master e panning stereo
