@@ -179,6 +179,10 @@
         <option value="off">Spento (solo synth)</option>
       </select>
     </div>
+    <div class="ctl">
+      <label>Clip per la DAW (Ableton, ecc.)</label>
+      <button id="midiFile" type="button">💾 Esporta ciclo (.mid)</button>
+    </div>
   </div>
 </div>
 
@@ -349,6 +353,51 @@ function midiPanic(){
   if (!midiPort) return;
   for (const ch of [0, 1]) midiPort.send([0xB0 | ch, 123, 0]); // all notes off
 }
+
+// esporta un ciclo completo (riallineamento incluso lo sdoppiamento) come
+// Standard MIDI File: a 120 BPM un secondo = 2 beat, quindi 60 s = 30 battute;
+// in Live la clip segue poi il tempo del progetto
+function exportMidi(){
+  if (!pendulums.length) rebuild(true);
+  const PPQ = 480, secToTicks = s => Math.round(s * 2 * PPQ);
+  const vlq = n => { const b = [n & 0x7F]; while ((n >>= 7)) b.unshift((n & 0x7F) | 0x80); return b; };
+  const str = s => [...s].map(c => c.charCodeAt(0));
+  const u32 = n => [n >>> 24 & 255, n >>> 16 & 255, n >>> 8 & 255, n & 255];
+  const u16 = n => [n >>> 8 & 255, n & 255];
+  const track = evs => {
+    evs.sort((a, b) => a.t - b.t || a.ord - b.ord);   // a pari tick: prima i note-off
+    const out = []; let last = 0;
+    for (const e of evs){ out.push(...vlq(e.t - last), ...e.msg); last = e.t; }
+    out.push(0, 0xFF, 0x2F, 0);
+    return [...str("MTrk"), ...u32(out.length), ...out];
+  };
+  const meta = [
+    { t: 0, ord: 0, msg: [0xFF, 0x51, 3, 0x07, 0xA1, 0x20] },  // 120 BPM
+    { t: 0, ord: 1, msg: [0xFF, 0x58, 4, 4, 2, 24, 8] },       // 4/4
+  ];
+  const layers = [[], []];
+  for (const p of pendulums){
+    const ch = p.layer ? 1 : 0;
+    const gate = Math.max(0.06, Math.min(0.4, p.hitPeriod * 0.5));
+    for (let k = 0; k * p.hitPeriod < realignT - 1e-6; k++){
+      const t = k * p.hitPeriod;
+      layers[p.layer].push({ t: secToTicks(t), ord: 1, msg: [0x90 | ch, p.midi, 100] });
+      layers[p.layer].push({ t: secToTicks(t + gate), ord: 0, msg: [0x80 | ch, p.midi, 0] });
+    }
+  }
+  const bytes = [
+    ...str("MThd"), ...u32(6), ...u16(1), ...u16(splitOn ? 3 : 2), ...u16(PPQ),
+    ...track(meta), ...track(layers[0]),
+  ];
+  if (splitOn) bytes.push(...track(layers[1]));
+  const blob = new Blob([new Uint8Array(bytes)], { type: "audio/midi" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `poliritmo-${mode}${splitOn ? "-x2" : ""}-${+ui.nPend.value}v.mid`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+$("midiFile").addEventListener("click", exportMidi);
 
 /* ---------- modello pendoli ---------- */
 let pendulums = [], t0 = 0, cycleT = 60, realignT = 60, running = true, mode = "pendulum", splitOn = false;
